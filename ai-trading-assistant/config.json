@@ -1,0 +1,45 @@
+{
+    "config_version": "2.0",
+    "last_updated": "2025-01-03T00:00:00",
+    
+    "trading_filters": {
+        "min_price": 2.00,
+        "max_price": 20.00,
+        "min_volume": 500000,
+        "min_rel_volume": 5.0,
+        "max_spread_percent": 0.02
+    },
+    
+    "system_settings": {
+        "scan_interval": 60,
+        "max_symbols": 100,
+        "parallel_analysis": true,
+        "analysis_timeout": 30
+    },
+    
+    "risk_management": {
+        "max_position_size": 1000,
+        "risk_per_trade": 0.02,
+        "max_daily_trades": 10,
+        "max_daily_loss": 0.03,
+        "profit_taking_intervals": [0.5, 0.75, 1.0]
+    },
+    
+    "trading_rules": {
+        "min_risk_reward": 2.0,
+        "min_setup_confidence": 75,
+        "max_spread_percent": 0.02
+    },
+    
+    "llm_configuration": {
+        "model": "llama3:latest",
+        "temperature": 0.7,
+        "max_tokens": 300,
+        "retry_attempts": 3
+    },
+    
+    "performance_tracking": {
+        "log_dir": "performance_logs",
+        "metrics_update_interval": 300
+    }
+}
