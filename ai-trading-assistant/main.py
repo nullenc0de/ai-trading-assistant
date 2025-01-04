@@ -3,6 +3,7 @@ import asyncio
 import logging
 import json
 import os
+import pandas as pd
 from datetime import datetime
 from enum import Enum, auto
 from typing import Dict, List, Optional, Any
@@ -21,8 +22,7 @@ class TradingState(Enum):
     INITIALIZATION = auto()
     MARKET_SCANNING = auto()
     OPPORTUNITY_DETECTION = auto()
-    ENTRY_DECISION = auto()
-    ACTIVE_MONITORING = auto()
+    POSITION_MANAGEMENT = auto()
     EXIT_MANAGEMENT = auto()
     COOLDOWN = auto()
 
@@ -178,67 +178,51 @@ class TradingSystem:
             await asyncio.sleep(60)  # Wait a minute on error
             return False
 
-    async def _perform_cooldown_tasks(self):
-        """Execute post-trade analysis and system maintenance"""
-        try:
-            # Generate performance report
-            report = self.performance_tracker.generate_report()
-            logging.info(f"Performance Report:\n{report}")
-            
-            # Update metrics
-            self._update_performance_metrics()
-            
-            # Clean up any stale data
-            self.active_trades.clear()
-            
-            # Brief cooldown period
-            await asyncio.sleep(30)
-            
-        except Exception as e:
-            logging.error(f"Error in cooldown tasks: {str(e)}")
-
-    def _update_performance_metrics(self):
-        """Update system performance metrics"""
-        try:
-            # Calculate success rate
-            if self.metrics['trades_executed'] > 0:
-                success_rate = (
-                    self.metrics['successful_trades'] / 
-                    self.metrics['trades_executed'] * 100
-                )
-                logging.info(f"Current success rate: {success_rate:.2f}%")
-            
-            # Log other metrics
-            logging.info("Performance Metrics:")
-            for metric, value in self.metrics.items():
-                logging.info(f"- {metric}: {value}")
-                
-        except Exception as e:
-            logging.error(f"Error updating metrics: {str(e)}")
-
     async def analyze_symbol(self, symbol: str):
-        """Analyze a single stock symbol with enhanced debugging"""
+        """Analyze a single stock symbol and manage existing positions"""
         try:
             self.metrics['trades_analyzed'] += 1
             
-            # Analyze stock data
+            # Get current stock data first
             stock_data = self.analyzer.analyze_stock(symbol)
-            
             if not stock_data:
                 logging.debug(f"No analyzable data for {symbol}")
                 return
-            
-            # Print the technical indicators being passed to LLM
+
+            # Print the technical indicators
             technical_data = stock_data.get('technical_indicators', {})
             logging.info(f"Technical data for {symbol}:")
             logging.info(f"  Price: ${stock_data.get('current_price', 0):.2f}")
             logging.info(f"  RSI: {technical_data.get('rsi', 'N/A')}")
             logging.info(f"  VWAP: ${technical_data.get('vwap', 'N/A')}")
             
-            # Get trading setup from AI
+            # Check for existing position
+            open_positions = self.performance_tracker.get_open_positions()
+            if not open_positions.empty and symbol in open_positions['symbol'].values:
+                existing_position = open_positions[open_positions['symbol'] == symbol].iloc[0]
+                
+                # Get position management decision
+                position_action = await self.trading_analyst.analyze_position(
+                    stock_data=stock_data,
+                    position_data={
+                        'entry_price': existing_position['entry_price'],
+                        'current_price': stock_data['current_price'],
+                        'target_price': existing_position['target_price'],
+                        'stop_price': existing_position['stop_price'],
+                        'size': existing_position['position_size'],
+                        'time_held': (datetime.now() - pd.to_datetime(existing_position['timestamp'])).total_seconds() / 3600  # hours
+                    }
+                )
+                
+                # Handle position action
+                if position_action:
+                    await self._handle_position_action(symbol, position_action, existing_position, stock_data)
+                return
+            
+            # If no position exists, look for new setup
             trading_setup = await self.trading_analyst.analyze_setup(stock_data)
             
-            # Process valid setup
+            # Process new setup
             if trading_setup and 'NO SETUP' not in trading_setup:
                 self.metrics['setups_detected'] += 1
                 
@@ -274,9 +258,59 @@ class TradingSystem:
             
             else:
                 logging.debug(f"No valid setup found for {symbol}")
-        
+                
         except Exception as e:
             logging.error(f"Error analyzing {symbol}: {str(e)}")
+
+    async def _handle_position_action(self, symbol: str, action: Dict[str, Any], position: pd.Series, current_data: Dict[str, Any]):
+        """Handle position management actions"""
+        try:
+            action_type = action.get('action', '').upper()
+            
+            if action_type == 'HOLD':
+                logging.info(f"Maintaining position in {symbol}: {action.get('reason', 'No reason provided')}")
+                return
+                
+            elif action_type == 'EXIT':
+                # Close the full position
+                exit_data = {
+                    'status': 'CLOSED',
+                    'exit_price': current_data['current_price'],
+                    'exit_time': datetime.now().isoformat(),
+                    'notes': f"Full exit: {action.get('reason', 'No reason provided')}"
+                }
+                self.performance_tracker.update_trade(symbol, exit_data)
+                logging.info(f"Closed position in {symbol}: {action.get('reason', 'No reason provided')}")
+                
+            elif action_type == 'PARTIAL_EXIT':
+                # Handle partial position exit
+                exit_size = int(position['position_size'] * action.get('exit_percentage', 0.5))
+                remaining_size = position['position_size'] - exit_size
+                
+                # Close part of position
+                exit_data = {
+                    'position_size': remaining_size,
+                    'notes': f"Partial exit ({exit_size} shares): {action.get('reason', 'No reason provided')}"
+                }
+                self.performance_tracker.update_trade(symbol, exit_data)
+                logging.info(f"Partial exit of {exit_size} shares in {symbol}")
+                
+            elif action_type == 'ADJUST_STOPS':
+                # Update stop loss
+                new_stop = action.get('new_stop')
+                if new_stop:
+                    update_data = {
+                        'stop_price': new_stop,
+                        'notes': f"Stop adjusted to ${new_stop}: {action.get('reason', 'No reason provided')}"
+                    }
+                    self.performance_tracker.update_trade(symbol, update_data)
+                    logging.info(f"Adjusted stop to ${new_stop} for {symbol}")
+            
+            else:
+                logging.warning(f"Unknown position action type: {action_type}")
+                
+        except Exception as e:
+            logging.error(f"Error handling position action: {str(e)}")
 
     def _parse_trading_setup(self, setup: str) -> Dict[str, Any]:
         """Parse trading setup string into structured data"""
@@ -345,6 +379,44 @@ class TradingSystem:
             
         except Exception as e:
             logging.error(f"Error executing trade: {str(e)}")
+
+    async def _perform_cooldown_tasks(self):
+        """Execute post-trade analysis and system maintenance"""
+        try:
+            # Generate performance report
+            report = self.performance_tracker.generate_report()
+            logging.info(f"Performance Report:\n{report}")
+            
+            # Update metrics
+            self._update_performance_metrics()
+            
+            # Clean up any stale data
+            self.active_trades.clear()
+            
+            # Brief cooldown period
+            await asyncio.sleep(30)
+            
+        except Exception as e:
+            logging.error(f"Error in cooldown tasks: {str(e)}")
+
+    def _update_performance_metrics(self):
+        """Update system performance metrics"""
+        try:
+            # Calculate success rate
+            if self.metrics['trades_executed'] > 0:
+                success_rate = (
+                    self.metrics['successful_trades'] / 
+                    self.metrics['trades_executed'] * 100
+                )
+                logging.info(f"Current success rate: {success_rate:.2f}%")
+            
+            # Log other metrics
+            logging.info("Performance Metrics:")
+            for metric, value in self.metrics.items():
+                logging.info(f"- {metric}: {value}")
+                
+        except Exception as e:
+            logging.error(f"Error updating metrics: {str(e)}")
 
     async def run(self):
         """Main trading system loop with enhanced state management"""
