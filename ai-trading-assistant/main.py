@@ -6,7 +6,6 @@ from datetime import datetime
 from enum import Enum, auto
 from typing import Dict, List, Optional, Any
 
-# Import components
 from components.config_manager import ConfigManager
 from components.stock_scanner import StockScanner
 from components.stock_analyzer import StockAnalyzer
@@ -54,6 +53,7 @@ class TradingSystem:
         try:
             # Load configuration
             self.config_manager = ConfigManager('config.json')
+            logging.info("Configuration loaded successfully")
             
             # Initialize Robinhood authentication
             self.robinhood_auth = RobinhoodAuthenticator()
@@ -70,7 +70,7 @@ class TradingSystem:
             # Initialize analyzer and trader with config
             self.analyzer = StockAnalyzer(self.config_manager)
             self.trading_analyst = TradingAnalyst(
-                model=self.config_manager.get('llm_model', 'llama3:latest')
+                model=self.config_manager.get('llm_configuration.model', 'llama3:latest')
             )
             
             logging.info("All components initialized successfully")
@@ -85,21 +85,44 @@ class TradingSystem:
             # Create logs directory if it doesn't exist
             os.makedirs('logs', exist_ok=True)
             
-            # Create separate log files for different severity levels
-            handlers = [
-                logging.FileHandler(f'logs/trading_system_{level.lower()}.log')
-                for level in ['DEBUG', 'INFO', 'ERROR']
-            ]
+            # Configure different log levels
+            log_levels = {
+                'DEBUG': logging.DEBUG,
+                'INFO': logging.INFO,
+                'ERROR': logging.ERROR
+            }
             
-            # Add console handler
-            handlers.append(logging.StreamHandler())
+            # Setup handlers for each level
+            handlers = []
+            for level_name, level in log_levels.items():
+                handler = logging.FileHandler(f'logs/trading_system_{level_name.lower()}.log')
+                handler.setLevel(level)
+                handler.setFormatter(
+                    logging.Formatter('%(asctime)s - [%(levelname)s] - %(name)s - %(message)s')
+                )
+                # Only log messages at or above this level
+                handler.addFilter(lambda record: record.levelno == level)
+                handlers.append(handler)
             
-            # Configure logging with enhanced format
-            logging.basicConfig(
-                level=logging.DEBUG,
-                format='%(asctime)s - [%(levelname)s] - %(name)s - %(message)s',
-                handlers=handlers
+            # Add console handler for INFO and above
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(logging.INFO)
+            console_handler.setFormatter(
+                logging.Formatter('%(asctime)s - [%(levelname)s] - %(message)s')
             )
+            handlers.append(console_handler)
+            
+            # Configure root logger
+            root_logger = logging.getLogger()
+            root_logger.setLevel(logging.DEBUG)
+            
+            # Remove any existing handlers
+            for handler in root_logger.handlers[:]:
+                root_logger.removeHandler(handler)
+            
+            # Add our configured handlers
+            for handler in handlers:
+                root_logger.addHandler(handler)
             
         except Exception as e:
             print(f"Failed to setup logging: {str(e)}")
@@ -287,7 +310,8 @@ class TradingSystem:
                 return
 
             # Validate confidence threshold
-            if setup['confidence'] <= 80:
+            min_confidence = self.config_manager.get('trading_rules.min_setup_confidence', 75)
+            if setup['confidence'] <= min_confidence:
                 logging.info(f"Setup confidence {setup['confidence']}% below threshold for {symbol}")
                 return
 
@@ -307,7 +331,8 @@ class TradingSystem:
             for key, value in setup.items():
                 logging.info(f"- {key}: {value}")
             
-            # TODO: Add actual Robinhood trade execution using robin_stocks
+            # TODO: Implement Robinhood trade execution
+            # This would use robin_stocks library
             # Example:
             # r.orders.order_buy_market(symbol, setup['size'])
             
@@ -329,7 +354,9 @@ class TradingSystem:
                 await self._update_state(TradingState.MARKET_SCANNING)
                 
                 # Get symbols to analyze
-                symbols = await self.scanner.get_symbols()
+                symbols = await self.scanner.get_symbols(
+                    max_symbols=self.config_manager.get('system_settings.max_symbols', 100)
+                )
                 logging.info(f"Found {len(symbols)} symbols to analyze")
                 
                 if not symbols:
@@ -350,7 +377,7 @@ class TradingSystem:
                 await self._update_state(TradingState.COOLDOWN)
                 
                 # Configure scan interval
-                scan_interval = self.config_manager.get('scan_interval', 60)
+                scan_interval = self.config_manager.get('system_settings.scan_interval', 60)
                 await asyncio.sleep(scan_interval)
             
             except Exception as e:
