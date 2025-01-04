@@ -85,28 +85,20 @@ class TradingSystem:
             # Create logs directory if it doesn't exist
             os.makedirs('logs', exist_ok=True)
             
-            # Configure different log levels
-            log_levels = {
-                'DEBUG': logging.DEBUG,
-                'INFO': logging.INFO,
-                'ERROR': logging.ERROR
-            }
-            
-            # Setup handlers for each level
+            # Configure different log levels with file rotation
             handlers = []
-            for level_name, level in log_levels.items():
-                handler = logging.FileHandler(f'logs/trading_system_{level_name.lower()}.log')
-                handler.setLevel(level)
-                handler.setFormatter(
-                    logging.Formatter('%(asctime)s - [%(levelname)s] - %(name)s - %(message)s')
-                )
-                # Only log messages at or above this level
-                handler.addFilter(lambda record: record.levelno == level)
-                handlers.append(handler)
             
-            # Add console handler for INFO and above
+            # Debug log handler
+            debug_handler = logging.FileHandler('logs/trading_system_debug.log')
+            debug_handler.setLevel(logging.DEBUG)
+            debug_handler.setFormatter(
+                logging.Formatter('%(asctime)s - [%(levelname)s] - %(name)s - %(message)s')
+            )
+            handlers.append(debug_handler)
+            
+            # Console handler with more verbose output
             console_handler = logging.StreamHandler()
-            console_handler.setLevel(logging.INFO)
+            console_handler.setLevel(logging.DEBUG)  # Changed from INFO to DEBUG
             console_handler.setFormatter(
                 logging.Formatter('%(asctime)s - [%(levelname)s] - %(message)s')
             )
@@ -114,7 +106,7 @@ class TradingSystem:
             
             # Configure root logger
             root_logger = logging.getLogger()
-            root_logger.setLevel(logging.DEBUG)
+            root_logger.setLevel(logging.DEBUG)  # Set to DEBUG level
             
             # Remove any existing handlers
             for handler in root_logger.handlers[:]:
@@ -123,6 +115,8 @@ class TradingSystem:
             # Add our configured handlers
             for handler in handlers:
                 root_logger.addHandler(handler)
+            
+            logging.getLogger('urllib3').setLevel(logging.INFO)  # Reduce noise from HTTP client
             
         except Exception as e:
             print(f"Failed to setup logging: {str(e)}")
@@ -149,12 +143,7 @@ class TradingSystem:
             print("Error setting up Robinhood integration. Running in analysis-only mode.")
 
     async def _update_state(self, new_state: TradingState):
-        """
-        Update system state with logging and validation
-        
-        Args:
-            new_state (TradingState): New state to transition to
-        """
+        """Update system state with logging and validation"""
         old_state = self.current_state
         self.current_state = new_state
         
@@ -225,12 +214,7 @@ class TradingSystem:
             logging.error(f"Error updating metrics: {str(e)}")
 
     async def analyze_symbol(self, symbol: str):
-        """
-        Analyze a single stock symbol
-        
-        Args:
-            symbol (str): Stock ticker symbol
-        """
+        """Analyze a single stock symbol with enhanced debugging"""
         try:
             self.metrics['trades_analyzed'] += 1
             
@@ -240,6 +224,9 @@ class TradingSystem:
             if not stock_data:
                 logging.debug(f"No analyzable data for {symbol}")
                 return
+            
+            # Debug log the data structure
+            logging.debug(f"Stock data for {symbol}: {json.dumps(stock_data, indent=2)}")
             
             # Get trading setup from AI
             trading_setup = await self.trading_analyst.analyze_setup(stock_data)
@@ -258,51 +245,47 @@ class TradingSystem:
                 # Log trade setup
                 self.performance_tracker.log_trade({
                     'symbol': symbol,
-                    'entry_price': setup_details['entry_price'],
-                    'confidence': setup_details['confidence'],
+                    'entry_price': setup_details.get('entry_price'),
+                    'confidence': setup_details.get('confidence'),
                     'setup_details': trading_setup
                 })
                 
                 # Execute trade if conditions met
                 await self._execute_trade(symbol, setup_details)
+            
+            else:
+                logging.debug(f"No valid setup found for {symbol}")
         
         except Exception as e:
             logging.error(f"Error analyzing {symbol}: {str(e)}")
 
     def _parse_trading_setup(self, setup: str) -> Dict[str, Any]:
-        """
-        Parse trading setup string into structured data
-        
-        Args:
-            setup (str): Trading setup string
-        
-        Returns:
-            dict: Parsed setup details
-        """
+        """Parse trading setup string into structured data"""
         try:
+            # Log the setup being parsed
+            logging.debug(f"Parsing trading setup: {setup}")
+            
             # Extract key components using string parsing
             lines = setup.split('\n')
             
-            return {
-                'entry_price': float(lines[1].split('$')[1]),
-                'target_price': float(lines[2].split('$')[1]),
-                'stop_price': float(lines[3].split('$')[1]),
-                'size': int(lines[4].split(':')[1].strip().split()[0]),
-                'confidence': float(lines[6].split(':')[1].strip().rstrip('%'))
-            }
+            try:
+                return {
+                    'entry_price': float(lines[1].split(')[1].strip()),
+                    'target_price': float(lines[2].split(')[1].strip()),
+                    'stop_price': float(lines[3].split(')[1].strip()),
+                    'size': int(lines[4].split(':')[1].strip().split()[0]),
+                    'confidence': float(lines[6].split(':')[1].strip().rstrip('%'))
+                }
+            except (IndexError, ValueError) as e:
+                logging.error(f"Error parsing setup values: {e}")
+                return {}
             
         except Exception as e:
             logging.error(f"Error parsing trading setup: {str(e)}")
             return {}
 
     async def _execute_trade(self, symbol: str, setup: Dict[str, Any]):
-        """
-        Execute trade based on setup details
-        
-        Args:
-            symbol (str): Stock symbol
-            setup (dict): Trading setup details
-        """
+        """Execute trade based on setup details"""
         try:
             # Check for Robinhood credentials
             credentials = self.robinhood_auth.load_credentials()
@@ -311,18 +294,18 @@ class TradingSystem:
 
             # Validate confidence threshold
             min_confidence = self.config_manager.get('trading_rules.min_setup_confidence', 75)
-            if setup['confidence'] <= min_confidence:
-                logging.info(f"Setup confidence {setup['confidence']}% below threshold for {symbol}")
+            if setup.get('confidence', 0) <= min_confidence:
+                logging.info(f"Setup confidence {setup.get('confidence')}% below threshold for {symbol}")
                 return
 
             self.metrics['trades_executed'] += 1
             
             # Add to active trades
             self.active_trades[symbol] = {
-                'entry_price': setup['entry_price'],
-                'target_price': setup['target_price'],
-                'stop_price': setup['stop_price'],
-                'size': setup['size'],
+                'entry_price': setup.get('entry_price'),
+                'target_price': setup.get('target_price'),
+                'stop_price': setup.get('stop_price'),
+                'size': setup.get('size'),
                 'entry_time': datetime.now()
             }
             
