@@ -1,0 +1,10 @@
+{
+    "holidays": [],
+    "half_days": [],
+    "special_events": [],
+    "testing_mode": {
+        "enabled": true,
+        "override_market_hours": true,
+        "scan_interval": 60
+    }
+}
