@@ -88,7 +88,7 @@ class TradingSystem:
             # Configure different log levels with file rotation
             handlers = []
             
-            # Debug log handler
+            # Debug log handler (file only)
             debug_handler = logging.FileHandler('logs/trading_system_debug.log')
             debug_handler.setLevel(logging.DEBUG)
             debug_handler.setFormatter(
@@ -96,9 +96,9 @@ class TradingSystem:
             )
             handlers.append(debug_handler)
             
-            # Console handler with more verbose output
+            # Info log handler (console)
             console_handler = logging.StreamHandler()
-            console_handler.setLevel(logging.DEBUG)  # Changed from INFO to DEBUG
+            console_handler.setLevel(logging.INFO)  # Changed from DEBUG to INFO
             console_handler.setFormatter(
                 logging.Formatter('%(asctime)s - [%(levelname)s] - %(message)s')
             )
@@ -106,7 +106,7 @@ class TradingSystem:
             
             # Configure root logger
             root_logger = logging.getLogger()
-            root_logger.setLevel(logging.DEBUG)  # Set to DEBUG level
+            root_logger.setLevel(logging.DEBUG)
             
             # Remove any existing handlers
             for handler in root_logger.handlers[:]:
@@ -114,9 +114,11 @@ class TradingSystem:
             
             # Add our configured handlers
             for handler in handlers:
-                root_logger.addHandler(handler)
+                root_handler.addHandler(handler)
             
-            logging.getLogger('urllib3').setLevel(logging.INFO)  # Reduce noise from HTTP client
+            # Reduce noise from HTTP client and yfinance
+            logging.getLogger('urllib3').setLevel(logging.WARNING)
+            logging.getLogger('yfinance').setLevel(logging.WARNING)
             
         except Exception as e:
             print(f"Failed to setup logging: {str(e)}")
@@ -225,8 +227,12 @@ class TradingSystem:
                 logging.debug(f"No analyzable data for {symbol}")
                 return
             
-            # Debug log the data structure
-            logging.debug(f"Stock data for {symbol}: {json.dumps(stock_data, indent=2)}")
+            # Print the technical indicators being passed to LLM
+            technical_data = stock_data.get('technical_indicators', {})
+            logging.info(f"Technical data for {symbol}:")
+            logging.info(f"  Price: ${stock_data.get('current_price', 0):.2f}")
+            logging.info(f"  RSI: {technical_data.get('rsi', 'N/A')}")
+            logging.info(f"  VWAP: ${technical_data.get('vwap', 'N/A')}")
             
             # Get trading setup from AI
             trading_setup = await self.trading_analyst.analyze_setup(stock_data)
