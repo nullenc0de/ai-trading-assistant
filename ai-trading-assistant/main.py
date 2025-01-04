@@ -114,7 +114,7 @@ class TradingSystem:
             
             # Add our configured handlers
             for handler in handlers:
-                root_handler.addHandler(handler)
+                root_logger.addHandler(handler)  # Fixed: root_handler -> root_logger
             
             # Reduce noise from HTTP client and yfinance
             logging.getLogger('urllib3').setLevel(logging.WARNING)
