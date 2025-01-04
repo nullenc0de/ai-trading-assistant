@@ -241,7 +241,7 @@ class StockScanner:
                 return False
                 
             # Check for common invalid patterns
-            invalid_patterns = ['_', '.', '-', ']
+            invalid_patterns = ['_', '.', '-', '$']
             if any(pattern in symbol for pattern in invalid_patterns):
                 return False
             
