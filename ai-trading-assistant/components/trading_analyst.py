@@ -80,7 +80,7 @@ Risk-Reward Ratio: X:1"""
         return prompt
 
     async def analyze_setup(self, data: Dict[str, Any]) -> Optional[str]:
-        """Get trading analysis from LLM with enhanced error handling"""
+        """Get trading analysis from LLM with enhanced debugging"""
         symbol = data['symbol']
         current_time = datetime.now()
 
@@ -106,31 +106,52 @@ Risk-Reward Ratio: X:1"""
             # Generate prompt
             prompt = self.generate_prompt(data)
             
-            response = ollama.generate(
-                model=self.model,
-                prompt=prompt,
-                options={
-                    'temperature': 0.7,
-                    'top_p': 0.9,
-                    'max_tokens': 300
-                }
-            )
+            # Log the prompt for debugging
+            self.logger.debug(f"Generated prompt for {symbol}: {prompt}")
             
-            setup = response['response'].strip()
-                
-            # Validate setup
-            if setup == 'NO SETUP' or (
-                'TRADING SETUP:' in setup and 
-                self._validate_setup(setup, data)
-            ):
-                # Update cache and timing
-                self.setup_cache[symbol] = (current_time, setup)
-                self.last_analysis_time[symbol] = current_time
-                return setup
-            
-            self.logger.warning(f"Invalid setup generated for {symbol}")
-            return "NO SETUP"
-                
+            # Try multiple times if needed
+            for attempt in range(self.max_retries):
+                try:
+                    response = ollama.generate(
+                        model=self.model,
+                        prompt=prompt,
+                        options={
+                            'temperature': 0.7,
+                            'top_p': 0.9,
+                            'max_tokens': 300,
+                            'stop': ['\n\n', 'NO SETUP']
+                        }
+                    )
+                    
+                    setup = response['response'].strip()
+                    
+                    # Log the raw response
+                    self.logger.debug(f"Raw LLM response for {symbol}: {setup}")
+                    
+                    # Basic format check
+                    if not setup.startswith('TRADING SETUP:') and setup != 'NO SETUP':
+                        self.logger.warning(f"Invalid response format for {symbol} on attempt {attempt + 1}")
+                        if attempt == self.max_retries - 1:
+                            return "NO SETUP"
+                        continue
+                    
+                    # Validate setup
+                    if setup == 'NO SETUP' or self._validate_setup(setup, data):
+                        # Update cache and timing
+                        self.setup_cache[symbol] = (current_time, setup)
+                        self.last_analysis_time[symbol] = current_time
+                        return setup
+                    
+                    if attempt == self.max_retries - 1:
+                        self.logger.warning(f"All attempts failed for {symbol}")
+                        return "NO SETUP"
+                    
+                except Exception as e:
+                    self.logger.error(f"Attempt {attempt + 1} failed for {symbol}: {str(e)}")
+                    if attempt == self.max_retries - 1:
+                        return "NO SETUP"
+                    await asyncio.sleep(1)  # Brief pause between retries
+                    
         except Exception as e:
             self.logger.error(f"Error analyzing setup for {symbol}: {str(e)}")
             return "NO SETUP"
@@ -140,27 +161,47 @@ Risk-Reward Ratio: X:1"""
         try:
             if setup == 'NO SETUP':
                 return True
-                
+            
+            # Log the setup being validated
+            self.logger.debug(f"Validating setup: {setup}")
+            
+            # Split into lines and check minimum length
             lines = setup.split('\n')
-            entry_price = float(lines[1].split('$')[1])
-            target_price = float(lines[2].split('$')[1])
-            stop_price = float(lines[3].split('$')[1])
+            if len(lines) < 7:  # Need at least 7 lines for a valid setup
+                self.logger.warning("Setup has insufficient lines")
+                return False
+            
+            # Extract values with better error handling
+            try:
+                entry_price = float(lines[1].split('$')[1].strip())
+                target_price = float(lines[2].split('$')[1].strip())
+                stop_price = float(lines[3].split('$')[1].strip())
+            except (IndexError, ValueError) as e:
+                self.logger.warning(f"Error parsing price values: {e}")
+                return False
             
             # Validate prices are reasonable
             current_price = data['current_price']
             if not (0.8 * current_price <= entry_price <= 1.2 * current_price):
+                self.logger.warning(f"Entry price {entry_price} too far from current price {current_price}")
                 return False
-                
+            
             # Validate risk/reward
             risk = abs(entry_price - stop_price)
             reward = abs(target_price - entry_price)
-            if risk == 0 or reward / risk < 2:  # Minimum 2:1 reward/risk
+            if risk == 0:
+                self.logger.warning("Zero risk (entry price equals stop price)")
                 return False
                 
+            risk_reward = reward / risk
+            if risk_reward < 2:  # Minimum 2:1 reward/risk
+                self.logger.warning(f"Risk/reward ratio {risk_reward} below minimum")
+                return False
+            
             return True
             
         except Exception as e:
-            self.logger.error(f"Setup validation error: {str(e)}")
+            self.logger.error(f"Setup validation error: {str(e)}\nSetup text: {setup}")
             return False
 
     def clear_cache(self, symbol: Optional[str] = None) -> None:
