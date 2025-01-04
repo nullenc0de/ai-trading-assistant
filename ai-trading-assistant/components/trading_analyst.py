@@ -50,8 +50,7 @@ class TradingAnalyst:
         ta_summary = self._generate_technical_summary(data)
         volume_analysis = self._analyze_volume_profile(data)
 
-        prompt = f"""Act as an expert day trader and systematic risk manager focused on technical analysis and price action.
-Analyze this stock for a potential day trade setup, prioritizing risk management and clear entry/exit points.
+        prompt = f"""You are an expert AI stock trader. Analyze this stock data and if a valid trading setup exists, respond with it in the EXACT format shown below. If no valid setup exists, respond only with 'NO SETUP'.
 
 SYMBOL ANALYSIS:
 {ta_summary}
@@ -59,25 +58,28 @@ SYMBOL ANALYSIS:
 VOLUME PROFILE:
 {volume_analysis}
 
-TRADING DECISION FRAMEWORK:
-1. Validate trend alignment
-2. Confirm volume supports price action
-3. Identify key support/resistance levels
-4. Calculate precise entry/exit points
-5. Determine position size based on risk
-6. Assess overall setup probability
-
-Based on the above analysis, provide a trading setup following this EXACT format, or respond with 'NO SETUP' if no valid setup exists:
+Here is the EXACT format you must use for a trading setup. STRICTLY follow this format or respond with 'NO SETUP':
 
 TRADING SETUP: {data['symbol']}
-Entry: $PRICE
-Target: $PRICE
-Stop: $PRICE
-Size: # shares
-Reason: [Concise trading rationale]
-Confidence: [0-100%]
-Risk-Reward Ratio: X:1"""
-        return prompt
+Entry: $XX.XX
+Target: $XX.XX
+Stop: $XX.XX
+Size: 100
+Reason: Clear and concise reason for trade
+Confidence: 85%
+Risk-Reward Ratio: 2.5:1
+
+Required format rules:
+1. Must include TRADING SETUP: followed by symbol
+2. Entry/Target/Stop must use $ followed by price
+3. Must include all seven lines exactly as shown
+4. Entry price must be within 20% of current price
+5. Risk-reward must be at least 2:1
+6. Confidence must be between 0-100%
+
+If you cannot format the response EXACTLY like this, respond with 'NO SETUP' instead.
+
+Your response:"""
 
     async def analyze_setup(self, data: Dict[str, Any]) -> Optional[str]:
         """Get trading analysis from LLM with enhanced debugging"""
@@ -91,23 +93,11 @@ Risk-Reward Ratio: X:1"""
                 self.logger.warning(f"Missing required data fields for {symbol}")
                 return "NO SETUP"
 
-            # Check cache first
-            if symbol in self.setup_cache:
-                cache_time, cache_data = self.setup_cache[symbol]
-                if (current_time - cache_time).seconds < 300:  # 5-minute cache
-                    return cache_data
-
-            # Rate limiting
-            if symbol in self.last_analysis_time:
-                time_since_last = (current_time - self.last_analysis_time[symbol]).seconds
-                if time_since_last < 60:  # 1-minute minimum between analyses
-                    await asyncio.sleep(60 - time_since_last)
-
             # Generate prompt
             prompt = self.generate_prompt(data)
             
             # Log the prompt for debugging
-            self.logger.debug(f"Generated prompt for {symbol}: {prompt}")
+            self.logger.debug(f"Generated prompt for {symbol}:\n{prompt}")
             
             # Try multiple times if needed
             for attempt in range(self.max_retries):
@@ -119,14 +109,14 @@ Risk-Reward Ratio: X:1"""
                             'temperature': 0.7,
                             'top_p': 0.9,
                             'max_tokens': 300,
-                            'stop': ['\n\n', 'NO SETUP']
+                            'stop': ['\n\n', '\n\n\n']
                         }
                     )
                     
                     setup = response['response'].strip()
                     
                     # Log the raw response
-                    self.logger.debug(f"Raw LLM response for {symbol}: {setup}")
+                    self.logger.info(f"LLM Response for {symbol} (Attempt {attempt + 1}):\n{setup}")
                     
                     # Basic format check
                     if not setup.startswith('TRADING SETUP:') and setup != 'NO SETUP':
@@ -137,13 +127,10 @@ Risk-Reward Ratio: X:1"""
                     
                     # Validate setup
                     if setup == 'NO SETUP' or self._validate_setup(setup, data):
-                        # Update cache and timing
-                        self.setup_cache[symbol] = (current_time, setup)
-                        self.last_analysis_time[symbol] = current_time
                         return setup
                     
                     if attempt == self.max_retries - 1:
-                        self.logger.warning(f"All attempts failed for {symbol}")
+                        self.logger.warning(f"All validation attempts failed for {symbol}")
                         return "NO SETUP"
                     
                 except Exception as e:
