@@ -58,10 +58,10 @@ TRADING SETUP: {data['symbol']}
 Entry: $XX.XX
 Target: $XX.XX
 Stop: $XX.XX
-Size: 100
+Size: X
 Reason: One line reason
-Confidence: 85%
-Risk-Reward Ratio: 2.5:1
+Confidence: X%
+Risk-Reward Ratio: X:1
 
 If you don't find a valid setup, respond only with the text: NO SETUP
 
