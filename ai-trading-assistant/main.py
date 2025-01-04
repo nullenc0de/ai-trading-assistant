@@ -1,4 +1,3 @@
-# main.py
 import asyncio
 import logging
 import json
@@ -115,7 +114,7 @@ class TradingSystem:
             
             # Add our configured handlers
             for handler in handlers:
-                root_logger.addHandler(handler)
+                root_logger.addHandler(handler)  # Fixed: root_handler -> root_logger
             
             # Reduce noise from HTTP client and yfinance
             logging.getLogger('urllib3').setLevel(logging.WARNING)
@@ -277,9 +276,9 @@ class TradingSystem:
             
             try:
                 return {
-                    'entry_price': float(lines[1].split(')[1].strip()),
-                    'target_price': float(lines[2].split(')[1].strip()),
-                    'stop_price': float(lines[3].split(')[1].strip()),
+                    'entry_price': float(lines[1].split('$')[1].strip()),
+                    'target_price': float(lines[2].split('$')[1].strip()),
+                    'stop_price': float(lines[3].split('$')[1].strip()),
                     'size': int(lines[4].split(':')[1].strip().split()[0]),
                     'confidence': float(lines[6].split(':')[1].strip().rstrip('%'))
                 }
