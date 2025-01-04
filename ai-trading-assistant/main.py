@@ -270,9 +270,9 @@ class TradingSystem:
             
             try:
                 return {
-                    'entry_price': float(lines[1].split(')[1].strip()),
-                    'target_price': float(lines[2].split(')[1].strip()),
-                    'stop_price': float(lines[3].split(')[1].strip()),
+                    'entry_price': float(lines[1].split('$')[1].strip()),
+                    'target_price': float(lines[2].split('$')[1].strip()),
+                    'stop_price': float(lines[3].split('$')[1].strip()),
                     'size': int(lines[4].split(':')[1].strip().split()[0]),
                     'confidence': float(lines[6].split(':')[1].strip().rstrip('%'))
                 }
