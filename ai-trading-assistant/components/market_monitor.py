@@ -19,6 +19,7 @@ class MarketMonitor:
         """
         self.timezone = pytz.timezone(timezone)
         self.config_path = config_path or 'market_calendar.json'
+        self.logger = logging.getLogger(__name__)
         
         # Market hours configuration
         self.regular_market_hours = {
@@ -30,13 +31,8 @@ class MarketMonitor:
         
         # Initialize market calendar
         self.market_calendar = self._load_market_calendar()
-        
-        # Market status cache
-        self._status_cache = {}
-        self._cache_duration = timedelta(minutes=5)
-        self._last_cache_update = None
 
-    def _load_market_calendar(self) -> Dict[str, List[str]]:
+    def _load_market_calendar(self) -> Dict[str, Any]:
         """Load market calendar with holidays and special dates"""
         try:
             if Path(self.config_path).exists():
@@ -47,7 +43,12 @@ class MarketMonitor:
             calendar = {
                 'holidays': self._generate_default_holidays(),
                 'half_days': self._generate_half_days(),
-                'special_events': []
+                'special_events': [],
+                'testing_mode': {
+                    'enabled': True,
+                    'override_market_hours': True,
+                    'scan_interval': 60
+                }
             }
             
             # Save default calendar
@@ -55,12 +56,25 @@ class MarketMonitor:
             return calendar
             
         except Exception as e:
-            logging.error(f"Error loading market calendar: {str(e)}")
+            self.logger.error(f"Error loading market calendar: {str(e)}")
             return {
                 'holidays': self._generate_default_holidays(),
                 'half_days': [],
-                'special_events': []
+                'special_events': [],
+                'testing_mode': {
+                    'enabled': True,
+                    'override_market_hours': True,
+                    'scan_interval': 60
+                }
             }
+
+    def _save_market_calendar(self, calendar: Dict[str, Any]) -> None:
+        """Save market calendar to file"""
+        try:
+            with open(self.config_path, 'w') as f:
+                json.dump(calendar, f, indent=2)
+        except Exception as e:
+            self.logger.error(f"Error saving market calendar: {str(e)}")
 
     def _generate_default_holidays(self) -> List[str]:
         """Generate default market holidays for current year"""
@@ -84,23 +98,21 @@ class MarketMonitor:
             f"{current_year}-12-24",  # Christmas Eve
         ]
 
-    def _save_market_calendar(self, calendar: Dict[str, List[str]]) -> None:
-        """Save market calendar to file"""
-        try:
-            with open(self.config_path, 'w') as f:
-                json.dump(calendar, f, indent=2)
-        except Exception as e:
-            logging.error(f"Error saving market calendar: {str(e)}")
-
     def is_market_open(self, include_extended: bool = False) -> bool:
         """Check if market is currently open"""
         try:
+            # Check testing mode first
+            testing_mode = self.market_calendar.get('testing_mode', {})
+            if testing_mode.get('enabled') and testing_mode.get('override_market_hours'):
+                self.logger.debug("Market open due to testing mode override")
+                return True
+            
             # Get current time in market timezone
             now = datetime.now(self.timezone)
             current_time = now.time()
             
             # Check if it's a holiday
-            if now.strftime("%Y-%m-%d") in self.market_calendar['holidays']:
+            if now.strftime("%Y-%m-%d") in self.market_calendar.get('holidays', []):
                 return False
             
             # Check if it's a weekend
@@ -108,7 +120,7 @@ class MarketMonitor:
                 return False
             
             # Check if it's a half day
-            is_half_day = now.strftime("%Y-%m-%d") in self.market_calendar['half_days']
+            is_half_day = now.strftime("%Y-%m-%d") in self.market_calendar.get('half_days', [])
             
             if include_extended:
                 return (
@@ -120,8 +132,9 @@ class MarketMonitor:
                     self.regular_market_hours['open'] <= current_time <
                     (time(13, 0) if is_half_day else self.regular_market_hours['close'])
                 )
+                
         except Exception as e:
-            logging.error(f"Error checking market status: {str(e)}")
+            self.logger.error(f"Error checking market status: {str(e)}")
             return False
 
     def get_market_status(self) -> Dict[str, Any]:
@@ -129,14 +142,19 @@ class MarketMonitor:
         try:
             now = datetime.now(self.timezone)
             
+            # Get testing mode status
+            testing_mode = self.market_calendar.get('testing_mode', {})
+            is_testing = testing_mode.get('enabled', False)
+            
             status = {
                 'timestamp': now.isoformat(),
                 'is_open': self.is_market_open(False),
                 'is_extended_hours_open': self.is_market_open(True),
                 'current_time': now.strftime('%H:%M:%S'),
-                'today_is_holiday': now.strftime("%Y-%m-%d") in self.market_calendar['holidays'],
-                'today_is_half_day': now.strftime("%Y-%m-%d") in self.market_calendar['half_days'],
+                'today_is_holiday': now.strftime("%Y-%m-%d") in self.market_calendar.get('holidays', []),
+                'today_is_half_day': now.strftime("%Y-%m-%d") in self.market_calendar.get('half_days', []),
                 'is_weekend': now.weekday() >= 5,
+                'is_testing_mode': is_testing,
                 'market_hours': {
                     'regular_open': self.regular_market_hours['open'].strftime('%H:%M'),
                     'regular_close': self.regular_market_hours['close'].strftime('%H:%M'),
@@ -148,48 +166,71 @@ class MarketMonitor:
             return status
             
         except Exception as e:
-            logging.error(f"Error getting market status: {str(e)}")
+            self.logger.error(f"Error getting market status: {str(e)}")
             return {
                 'is_open': False,
                 'error': str(e)
             }
-            
-    def time_until_market_open(self, include_extended: bool = False) -> timedelta:
+
+    def time_until_market_open(self) -> timedelta:
         """Calculate time until next market opening"""
         try:
+            # Check testing mode first
+            testing_mode = self.market_calendar.get('testing_mode', {})
+            if testing_mode.get('enabled') and testing_mode.get('override_market_hours'):
+                return timedelta(seconds=testing_mode.get('scan_interval', 60))
+            
             now = datetime.now(self.timezone)
             
-            # If market is already open, return 0
-            if self.is_market_open(include_extended):
-                return timedelta(0)
-            
-            # Get target opening time
-            target_time = (
-                self.regular_market_hours['pre_market_open']
-                if include_extended
-                else self.regular_market_hours['open']
-            )
+            # If market is already open, return scan interval
+            if self.is_market_open():
+                return timedelta(seconds=60)
             
             # Calculate next market open
             next_open = now.replace(
-                hour=target_time.hour,
-                minute=target_time.minute,
+                hour=self.regular_market_hours['open'].hour,
+                minute=self.regular_market_hours['open'].minute,
                 second=0,
                 microsecond=0
             )
             
             # If we're past today's opening, move to next day
-            if now.time() >= target_time:
+            if now.time() >= self.regular_market_hours['open']:
                 next_open += timedelta(days=1)
             
             # Skip weekends and holidays
             while (
                 next_open.weekday() >= 5 or
-                next_open.strftime("%Y-%m-%d") in self.market_calendar['holidays']
+                next_open.strftime("%Y-%m-%d") in self.market_calendar.get('holidays', [])
             ):
                 next_open += timedelta(days=1)
             
             return next_open - now
+            
         except Exception as e:
-            logging.error(f"Error calculating time until market open: {str(e)}")
+            self.logger.error(f"Error calculating time until market open: {str(e)}")
             return timedelta(minutes=1)  # Return short delay on error
+
+    def update_calendar(self, calendar_data: Dict[str, Any]) -> bool:
+        """Update market calendar data"""
+        try:
+            self.market_calendar.update(calendar_data)
+            self._save_market_calendar(self.market_calendar)
+            return True
+        except Exception as e:
+            self.logger.error(f"Error updating calendar: {str(e)}")
+            return False
+
+    def set_testing_mode(self, enabled: bool = True, scan_interval: int = 60) -> bool:
+        """Configure testing mode"""
+        try:
+            self.market_calendar['testing_mode'] = {
+                'enabled': enabled,
+                'override_market_hours': enabled,
+                'scan_interval': scan_interval
+            }
+            self._save_market_calendar(self.market_calendar)
+            return True
+        except Exception as e:
+            self.logger.error(f"Error setting testing mode: {str(e)}")
+            return False
