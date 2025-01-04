@@ -1,0 +1,40 @@
+# Core Dependencies
+yfinance
+pandas
+numpy
+ollama
+pytz
+colorama
+tabulate
+cryptography
+
+# Trading API Integration
+robin-stocks  # Optional Robinhood API wrapper
+
+# Optional but recommended
+scikit-learn
+scipy
+
+# Development and Testing
+pytest
+mypy
+black
+isort
+# Core Dependencies
+yfinance
+pandas
+numpy
+ollama
+pytz
+colorama
+tabulate
+
+# Optional but recommended
+scikit-learn
+scipy
+
+# Development and Testing
+pytest
+mypy
+black
+isort
