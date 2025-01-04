@@ -1,40 +1,20 @@
 # Core Dependencies
-yfinance
-pandas
-numpy
-ollama
-pytz
-colorama
-tabulate
-cryptography
-
-# Trading API Integration
-robin-stocks  # Optional Robinhood API wrapper
-
-# Optional but recommended
-scikit-learn
-scipy
+yfinance              # Stock data fetching
+pandas                # Data manipulation
+numpy                 # Numerical operations
+ollama                # LLM integration for trading analysis
+robin_stocks          # Robinhood API integration
+aiohttp               # Async HTTP requests
+pytz                  # Timezone handling
+colorama              # Terminal coloring
+tabulate              # Table formatting
+cryptography          # Secure credential storage
 
 # Development and Testing
-pytest
-mypy
-black
-isort
-# Core Dependencies
-yfinance
-pandas
-numpy
-ollama
-pytz
-colorama
-tabulate
+pytest                # Testing framework
+black                 # Code formatting
+isort                 # Import sorting
+mypy                  # Static type checking
 
-# Optional but recommended
-scikit-learn
-scipy
-
-# Development and Testing
-pytest
-mypy
-black
-isort
+# Optional Performance Monitoring
+rich                  # Enhanced terminal output
