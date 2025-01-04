@@ -45,7 +45,7 @@ TRADING SETUP: {data['symbol']}
 Entry: $XX.XX
 Target: $XX.XX
 Stop: $XX.XX
-Size: 100
+Size: X
 Reason: One clear reason for the trade
 Confidence: XX%
 Risk-Reward Ratio: X:1
