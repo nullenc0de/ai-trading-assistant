@@ -32,7 +32,7 @@ class TradingSystem:
         # Current state
         self.current_state = TradingState.INITIALIZATION
         
-        # Setup logging with enhanced format
+        # Setup logging
         self._setup_logging()
         
         # System components initialization
@@ -69,7 +69,9 @@ class TradingSystem:
             
             # Initialize analyzer and trader with config
             self.analyzer = StockAnalyzer(self.config_manager)
-            self.trading_analyst = TradingAnalyst()
+            self.trading_analyst = TradingAnalyst(
+                model=self.config_manager.get('llm_model', 'llama3:latest')
+            )
             
             logging.info("All components initialized successfully")
             
@@ -109,7 +111,7 @@ class TradingSystem:
             credentials = self.robinhood_auth.load_credentials()
             
             if not credentials:
-                print("\n🤖 Robinhood Integration Setup")
+                print("\n🤖 Robinhood Integration")
                 print("No credentials found. Would you like to configure Robinhood integration?")
                 choice = input("(Y/N): ").strip().lower()
                 
@@ -147,17 +149,18 @@ class TradingSystem:
             market_status = self.market_monitor.get_market_status()
             
             if not market_status['is_open']:
-                time_until_open = market_status['time_until_open']
-                logging.info(f"Market closed. Next session in {time_until_open}")
+                time_until = self.market_monitor.time_until_market_open()
+                wait_seconds = min(time_until.seconds, 3600)  # Max wait 1 hour
                 
-                # Sleep until market opens
-                await asyncio.sleep(min(time_until_open.seconds, 3600))
+                logging.info(f"Market closed. Waiting {wait_seconds} seconds before next check")
+                await asyncio.sleep(wait_seconds)
                 return False
             
             return True
             
         except Exception as e:
             logging.error(f"Error validating market conditions: {str(e)}")
+            await asyncio.sleep(60)  # Wait a minute on error
             return False
 
     async def _perform_cooldown_tasks(self):
@@ -200,7 +203,7 @@ class TradingSystem:
 
     async def analyze_symbol(self, symbol: str):
         """
-        Analyze a single stock symbol with enhanced error handling and logging
+        Analyze a single stock symbol
         
         Args:
             symbol (str): Stock ticker symbol
@@ -230,12 +233,12 @@ class TradingSystem:
                 setup_details = self._parse_trading_setup(trading_setup)
                 
                 # Log trade setup
-                self.performance_tracker.log_trade(
-                    symbol=symbol,
-                    entry_price=setup_details['entry_price'],
-                    confidence=setup_details['confidence'],
-                    setup_details=trading_setup
-                )
+                self.performance_tracker.log_trade({
+                    'symbol': symbol,
+                    'entry_price': setup_details['entry_price'],
+                    'confidence': setup_details['confidence'],
+                    'setup_details': trading_setup
+                })
                 
                 # Execute trade if conditions met
                 await self._execute_trade(symbol, setup_details)
@@ -304,8 +307,9 @@ class TradingSystem:
             for key, value in setup.items():
                 logging.info(f"- {key}: {value}")
             
-            # TODO: Add actual Robinhood trade execution
-            # This would use robin-stocks library
+            # TODO: Add actual Robinhood trade execution using robin_stocks
+            # Example:
+            # r.orders.order_buy_market(symbol, setup['size'])
             
         except Exception as e:
             logging.error(f"Error executing trade: {str(e)}")
@@ -325,8 +329,13 @@ class TradingSystem:
                 await self._update_state(TradingState.MARKET_SCANNING)
                 
                 # Get symbols to analyze
-                symbols = self.scanner.get_symbols()
+                symbols = await self.scanner.get_symbols()
                 logging.info(f"Found {len(symbols)} symbols to analyze")
+                
+                if not symbols:
+                    logging.warning("No symbols found to analyze")
+                    await asyncio.sleep(60)
+                    continue
                 
                 # Update state to opportunity detection
                 await self._update_state(TradingState.OPPORTUNITY_DETECTION)
