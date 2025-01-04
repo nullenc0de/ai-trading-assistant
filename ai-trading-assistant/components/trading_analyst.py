@@ -12,6 +12,23 @@ class TradingAnalyst:
         self.max_retries = max_retries
         self.logger = logging.getLogger(__name__)
 
+    def _generate_technical_summary(self, data: Dict[str, Any]) -> str:
+        """Generate technical analysis summary with safety checks"""
+        price = data.get('current_price', 0)
+        rsi = data.get('technical_indicators', {}).get('rsi', 'N/A')
+        vwap = data.get('technical_indicators', {}).get('vwap', 'N/A')
+        sma20 = data.get('technical_indicators', {}).get('sma20', 'N/A')
+        ema9 = data.get('technical_indicators', {}).get('ema9', 'N/A')
+        atr = data.get('technical_indicators', {}).get('atr', 'N/A')
+        
+        return f"""TECHNICAL INDICATORS:
+- Price: ${price:.2f}
+- RSI: {rsi if rsi != 'N/A' else 'Not Available'}
+- VWAP: ${vwap if vwap != 'N/A' else 'Not Available'}
+- SMA20: ${sma20 if sma20 != 'N/A' else 'Not Available'}
+- EMA9: ${ema9 if ema9 != 'N/A' else 'Not Available'}
+- ATR: {atr if atr != 'N/A' else 'Not Available'}"""
+
     def generate_prompt(self, data: Dict[str, Any]) -> str:
         """Generate an enhanced prompt for LLM trading analysis"""
         return f"""You are a skilled stock trader. Analyze this data and provide a trading setup if valid.
@@ -28,7 +45,7 @@ TRADING SETUP: {data['symbol']}
 Entry: $XX.XX
 Target: $XX.XX
 Stop: $XX.XX
-Size: X
+Size: 100
 Reason: One clear reason for the trade
 Confidence: XX%
 Risk-Reward Ratio: X:1
@@ -40,6 +57,90 @@ RULES:
 4. Must include all fields exactly as shown
 
 Your response:"""
+
+    async def analyze_position(self, stock_data: Dict[str, Any], position_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze existing position and recommend state transition"""
+        try:
+            # Generate position analysis prompt
+            prompt = f"""You are managing an existing trading position. Analyze the current market conditions and decide the next state transition.
+
+POSITION STATUS:
+Symbol: {stock_data['symbol']}
+Entry Price: ${position_data['entry_price']:.2f}
+Current Price: ${position_data['current_price']:.2f}
+Target Price: ${position_data['target_price']:.2f}
+Stop Price: ${position_data['stop_price']:.2f}
+Position Size: {position_data['size']} shares
+Hours Held: {position_data['time_held']:.1f}
+
+CURRENT TECHNICAL DATA:
+Price: ${stock_data['current_price']:.2f}
+RSI: {stock_data.get('technical_indicators', {}).get('rsi', 'N/A')}
+VWAP: ${stock_data.get('technical_indicators', {}).get('vwap', 'N/A')}
+
+Unrealized P&L: ${(position_data['current_price'] - position_data['entry_price']) * position_data['size']:.2f}
+Unrealized P&L %: {((position_data['current_price'] / position_data['entry_price']) - 1) * 100:.1f}%
+
+Choose one of these actions and provide a clear reason:
+1. HOLD - Keep the position unchanged
+2. EXIT - Close the entire position
+3. PARTIAL_EXIT - Specify exit_percentage (e.g., 0.5 for 50%)
+4. ADJUST_STOPS - Provide new_stop price
+
+Factors to consider:
+- Position profitability and risk/reward
+- Technical indicators and trend
+- Time held vs typical holding period
+- Price action relative to key levels
+
+Respond in this EXACT format:
+ACTION: [action type]
+PARAMS: [additional parameters if needed]
+REASON: [One clear reason for this action]
+
+Your analysis and decision:"""
+
+            # Get LLM response
+            response = ollama.generate(
+                model=self.model,
+                prompt=prompt,
+                options={
+                    'temperature': 0.2,
+                    'num_predict': 150
+                }
+            )
+            
+            action_text = response.get('response', '').strip()
+            self.logger.info(f"Position analysis for {stock_data['symbol']}:\n{action_text}")
+            
+            # Parse action
+            try:
+                lines = action_text.split('\n')
+                action = {
+                    'action': lines[0].split(':')[1].strip(),
+                    'reason': lines[-1].split(':')[1].strip()
+                }
+                
+                # Parse additional parameters if present
+                if 'PARAMS:' in action_text:
+                    params_line = [l for l in lines if 'PARAMS:' in l][0]
+                    params_str = params_line.split(':')[1].strip()
+                    
+                    # Parse parameters
+                    if 'exit_percentage' in params_str:
+                        action['exit_percentage'] = float(params_str.split('=')[1].strip())
+                    elif 'new_stop' in params_str:
+                        action['new_stop'] = float(params_str.split('=')[1].strip())
+                
+                return action
+                
+            except Exception as e:
+                self.logger.error(f"Error parsing position action: {str(e)}")
+                return None
+            
+        except Exception as e:
+            self.logger.error(f"Error analyzing position: {str(e)}")
+            return None
 
     async def analyze_setup(self, data: Dict[str, Any]) -> Optional[str]:
         """Get trading analysis from LLM with enhanced debugging"""
@@ -65,8 +166,8 @@ Your response:"""
                         model=self.model,
                         prompt=prompt,
                         options={
-                            'temperature': 0.2,     # More focused responses
-                            'num_predict': 150,     # Keep responses concise
+                            'temperature': 0.2,
+                            'num_predict': 150,
                             'top_k': 10,
                             'top_p': 0.5
                         }
@@ -155,5 +256,4 @@ Your response:"""
             return True
             
         except Exception as e:
-            self.logger.error(f"Setup validation error: {str(e)}\nSetup text: {setup}")
-            return False
+            self
