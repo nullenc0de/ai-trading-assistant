@@ -1,28 +1,13 @@
 # components/stock_scanner.py
 import subprocess
 import logging
-import aiohttp
-import asyncio
-import pandas as pd
-import numpy as np
 from typing import List, Dict, Any, Optional, Set
 from datetime import datetime, timedelta
 
 class StockScanner:
     def __init__(self):
-        """Initialize Stock Scanner with enhanced filtering and data sources"""
-        # Base API endpoints
-        self.api_endpoints = {
-            'yahoo_gainers': 'https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved',
-            'yahoo_trending': 'https://finance.yahoo.com/markets/stocks/trending',
-            'yahoo_active': 'https://finance.yahoo.com/markets/stocks/most-active',
-            'yahoo_52week': 'https://finance.yahoo.com/markets/stocks/52-week-gainers'
-        }
-        
-        # Headers for API requests
-        self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
+        """Initialize Stock Scanner with curl command approach"""
+        self.curl_command = """curl -s 'https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?count=100&scrIds=DAY_GAINERS&formatted=true&start=0&fields=symbol,regularMarketPrice,regularMarketChangePercent,regularMarketVolume' -H 'User-Agent: Mozilla/5.0' | jq -r '.finance.result[0].quotes[].symbol' ; curl -s 'https://finance.yahoo.com/markets/stocks/trending/' -H 'User-Agent: Mozilla/5.0' | grep -oP '"symbol":"\K[A-Z]+(?=")' ; curl -s 'https://finance.yahoo.com/markets/stocks/most-active/?start=0&count=100' -H 'User-Agent: Mozilla/5.0' | grep -oP '"symbol":"\K[A-Z]+(?=")' ; curl -s 'https://finance.yahoo.com/markets/stocks/52-week-gainers/?start=0&count=50' -H 'User-Agent: Mozilla/5.0' | grep -oP '"symbol":"\K[A-Z]+(?=")'"""
         
         # Symbol cache with timestamp
         self._symbol_cache: Dict[str, Any] = {}
@@ -33,11 +18,11 @@ class StockScanner:
         self.blacklist: Set[str] = set()
         
         # Initialize logging
-        logging.getLogger(__name__).setLevel(logging.INFO)
+        self.logger = logging.getLogger(__name__)
 
     async def get_symbols(self, max_symbols: int = 100) -> List[str]:
         """
-        Get stock symbols from multiple sources with enhanced filtering
+        Get stock symbols from curl command with caching
         
         Args:
             max_symbols (int): Maximum number of symbols to return
@@ -50,31 +35,22 @@ class StockScanner:
             if self._check_cache():
                 return list(self._symbol_cache['symbols'])[:max_symbols]
             
-            # Collect symbols from multiple sources
-            symbols = set()
-            
-            # Gather tasks for parallel execution
-            tasks = [
-                self._fetch_gainers(),
-                self._fetch_trending(),
-                self._fetch_most_active(),
-                self._fetch_52week_highs()
-            ]
-            
-            # Execute tasks concurrently
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # Process results
-            for result in results:
-                if isinstance(result, Exception):
-                    logging.error(f"Error fetching symbols: {str(result)}")
-                    continue
-                    
-                if isinstance(result, list):
-                    symbols.update(result)
+            result = subprocess.run(
+                self.curl_command,
+                shell=True,
+                capture_output=True,
+                text=True
+            )
+
+            if result.returncode != 0:
+                self.logger.error(f"Curl command failed: {result.stderr}")
+                return []
+
+            # Split output into lines and remove duplicates
+            symbols = list(set(result.stdout.strip().split('\n')))
             
             # Filter and validate symbols
-            filtered_symbols = self._filter_symbols(list(symbols))
+            filtered_symbols = self._filter_symbols(symbols)
             
             # Update cache
             self._update_cache(filtered_symbols)
@@ -82,120 +58,7 @@ class StockScanner:
             return filtered_symbols[:max_symbols]
             
         except Exception as e:
-            logging.error(f"Failed to get symbols: {str(e)}")
-            return []
-
-    async def _fetch_gainers(self) -> List[str]:
-        """Fetch top gainers from Yahoo Finance"""
-        try:
-            params = {
-                'count': 100,
-                'scrIds': 'day_gainers',
-                'formatted': 'true',
-                'start': 0,
-                'fields': 'symbol,regularMarketPrice,regularMarketChangePercent,regularMarketVolume'
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    self.api_endpoints['yahoo_gainers'],
-                    params=params,
-                    headers=self.headers
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        return [
-                            quote['symbol']
-                            for quote in data.get('finance', {}).get('result', [{}])[0].get('quotes', [])
-                        ]
-            return []
-            
-        except Exception as e:
-            logging.error(f"Error fetching gainers: {str(e)}")
-            return []
-
-    async def _fetch_trending(self) -> List[str]:
-        """Fetch trending stocks from Yahoo Finance"""
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    self.api_endpoints['yahoo_trending'],
-                    headers=self.headers
-                ) as response:
-                    if response.status == 200:
-                        text = await response.text()
-                        # Extract symbols from response using string manipulation
-                        symbols = []
-                        for line in text.split('\n'):
-                            if '"symbol":"' in line:
-                                symbol = line.split('"symbol":"')[1].split('"')[0]
-                                if self._is_valid_symbol(symbol):
-                                    symbols.append(symbol)
-                        return symbols
-            return []
-            
-        except Exception as e:
-            logging.error(f"Error fetching trending stocks: {str(e)}")
-            return []
-
-    async def _fetch_most_active(self) -> List[str]:
-        """Fetch most active stocks from Yahoo Finance"""
-        try:
-            params = {
-                'start': 0,
-                'count': 100
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    self.api_endpoints['yahoo_active'],
-                    params=params,
-                    headers=self.headers
-                ) as response:
-                    if response.status == 200:
-                        text = await response.text()
-                        # Extract symbols from response
-                        symbols = []
-                        for line in text.split('\n'):
-                            if '"symbol":"' in line:
-                                symbol = line.split('"symbol":"')[1].split('"')[0]
-                                if self._is_valid_symbol(symbol):
-                                    symbols.append(symbol)
-                        return symbols
-            return []
-            
-        except Exception as e:
-            logging.error(f"Error fetching most active stocks: {str(e)}")
-            return []
-
-    async def _fetch_52week_highs(self) -> List[str]:
-        """Fetch stocks at 52-week highs"""
-        try:
-            params = {
-                'start': 0,
-                'count': 50
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    self.api_endpoints['yahoo_52week'],
-                    params=params,
-                    headers=self.headers
-                ) as response:
-                    if response.status == 200:
-                        text = await response.text()
-                        # Extract symbols from response
-                        symbols = []
-                        for line in text.split('\n'):
-                            if '"symbol":"' in line:
-                                symbol = line.split('"symbol":"')[1].split('"')[0]
-                                if self._is_valid_symbol(symbol):
-                                    symbols.append(symbol)
-                        return symbols
-            return []
-            
-        except Exception as e:
-            logging.error(f"Error fetching 52-week highs: {str(e)}")
+            self.logger.error(f"Failed to get symbols: {str(e)}")
             return []
 
     def _filter_symbols(self, symbols: List[str]) -> List[str]:
@@ -214,7 +77,7 @@ class StockScanner:
             if self._is_valid_symbol(symbol) and symbol not in self.blacklist:
                 filtered.append(symbol)
         
-        # Sort by various criteria
+        # Sort by symbol name
         return sorted(list(set(filtered)))
 
     def _is_valid_symbol(self, symbol: str) -> bool:
@@ -285,7 +148,7 @@ class StockScanner:
         """
         if self._is_valid_symbol(symbol):
             self.blacklist.add(symbol)
-            logging.info(f"Added {symbol} to blacklist")
+            self.logger.info(f"Added {symbol} to blacklist")
 
     def remove_from_blacklist(self, symbol: str) -> None:
         """
@@ -295,13 +158,13 @@ class StockScanner:
             symbol (str): Symbol to remove from blacklist
         """
         self.blacklist.discard(symbol)
-        logging.info(f"Removed {symbol} from blacklist")
+        self.logger.info(f"Removed {symbol} from blacklist")
 
     def clear_cache(self) -> None:
         """Clear symbol cache"""
         self._symbol_cache = {}
         self._last_cache_update = None
-        logging.info("Symbol cache cleared")
+        self.logger.info("Symbol cache cleared")
 
     def get_cache_info(self) -> Dict[str, Any]:
         """
