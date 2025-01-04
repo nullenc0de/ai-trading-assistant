@@ -3,8 +3,9 @@ import os
 import json
 import getpass
 import logging
+from typing import Optional, Dict, Any
 from cryptography.fernet import Fernet
-from typing import Optional, Dict
+from pathlib import Path
 
 class RobinhoodAuthenticator:
     def __init__(self, config_path='robinhood_config.json'):
@@ -15,119 +16,211 @@ class RobinhoodAuthenticator:
             config_path (str): Path to store encrypted credentials
         """
         self.config_path = config_path
-        self.encryption_key_path = 'robinhood_key.key'
+        self.key_path = 'robinhood.key'
+        
+        # Initialize logging
+        self.logger = logging.getLogger(__name__)
+        
+        # Initialize encryption
+        self._init_encryption()
         
         # Ensure secure file permissions
-        self._set_secure_file_permissions()
+        self._set_secure_permissions()
 
-    def _set_secure_file_permissions(self):
-        """
-        Set secure file permissions for credential storage
-        """
+    def _init_encryption(self) -> None:
+        """Initialize encryption key and cipher suite"""
         try:
-            # Unix/Linux file permission setting
-            if os.name != 'nt':
-                os.chmod(self.config_path, 0o600)  # Read/write for owner only
-                os.chmod(self.encryption_key_path, 0o600)
+            if not os.path.exists(self.key_path):
+                # Generate new key
+                key = Fernet.generate_key()
+                with open(self.key_path, 'wb') as key_file:
+                    key_file.write(key)
+                self.key = key
+            else:
+                # Load existing key
+                with open(self.key_path, 'rb') as key_file:
+                    self.key = key_file.read()
+            
+            # Initialize cipher suite
+            self.cipher_suite = Fernet(self.key)
+            
         except Exception as e:
-            logging.warning(f"Could not set secure file permissions: {e}")
+            self.logger.error(f"Error initializing encryption: {str(e)}")
+            self.key = None
+            self.cipher_suite = None
 
-    def _generate_key(self) -> bytes:
-        """
-        Generate a new encryption key
-        
-        Returns:
-            bytes: Encryption key
-        """
-        key = Fernet.generate_key()
-        with open(self.encryption_key_path, 'wb') as key_file:
-            key_file.write(key)
-        return key
+    def _set_secure_permissions(self) -> None:
+        """Set secure file permissions for credential and key files"""
+        try:
+            # Set permissions for key file
+            if os.path.exists(self.key_path):
+                os.chmod(self.key_path, 0o600)
+            
+            # Set permissions for config file
+            if os.path.exists(self.config_path):
+                os.chmod(self.config_path, 0o600)
+                
+        except Exception as e:
+            self.logger.error(f"Error setting file permissions: {str(e)}")
 
-    def _load_key(self) -> bytes:
+    def encrypt_value(self, value: str) -> Optional[str]:
         """
-        Load existing encryption key or generate a new one
+        Encrypt a single value
         
+        Args:
+            value (str): Value to encrypt
+            
         Returns:
-            bytes: Encryption key
+            str: Encrypted value or None on failure
         """
         try:
-            with open(self.encryption_key_path, 'rb') as key_file:
-                return key_file.read()
-        except FileNotFoundError:
-            return self._generate_key()
+            if not self.cipher_suite or value is None:
+                return None
+            return self.cipher_suite.encrypt(value.encode()).decode()
+        except Exception as e:
+            self.logger.error(f"Error encrypting value: {str(e)}")
+            return None
 
-    def encrypt_credentials(self, credentials: Dict[str, str]) -> Dict[str, str]:
+    def decrypt_value(self, encrypted_value: str) -> Optional[str]:
+        """
+        Decrypt a single value
+        
+        Args:
+            encrypted_value (str): Value to decrypt
+            
+        Returns:
+            str: Decrypted value or None on failure
+        """
+        try:
+            if not self.cipher_suite or encrypted_value is None:
+                return None
+            return self.cipher_suite.decrypt(encrypted_value.encode()).decode()
+        except Exception as e:
+            self.logger.error(f"Error decrypting value: {str(e)}")
+            return None
+
+    def encrypt_credentials(self, credentials: Dict[str, Any]) -> Dict[str, Any]:
         """
         Encrypt Robinhood credentials
         
         Args:
-            credentials (dict): User credentials
-        
+            credentials (dict): Credentials to encrypt
+            
         Returns:
             dict: Encrypted credentials
         """
-        key = self._load_key()
-        f = Fernet(key)
-        
-        encrypted_credentials = {}
-        for k, v in credentials.items():
-            encrypted_credentials[k] = f.encrypt(v.encode()).decode()
-        
-        return encrypted_credentials
+        encrypted_creds = {}
+        try:
+            for key, value in credentials.items():
+                if isinstance(value, str):
+                    encrypted_creds[key] = self.encrypt_value(value)
+                else:
+                    encrypted_creds[key] = value
+            return encrypted_creds
+        except Exception as e:
+            self.logger.error(f"Error encrypting credentials: {str(e)}")
+            return credentials
 
-    def decrypt_credentials(self, encrypted_credentials: Dict[str, str]) -> Dict[str, str]:
+    def decrypt_credentials(self, encrypted_creds: Dict[str, Any]) -> Dict[str, Any]:
         """
         Decrypt Robinhood credentials
         
         Args:
-            encrypted_credentials (dict): Encrypted credentials
-        
+            encrypted_creds (dict): Encrypted credentials
+            
         Returns:
             dict: Decrypted credentials
         """
-        key = self._load_key()
-        f = Fernet(key)
-        
-        decrypted_credentials = {}
-        for k, v in encrypted_credentials.items():
-            decrypted_credentials[k] = f.decrypt(v.encode()).decode()
-        
-        return decrypted_credentials
+        decrypted_creds = {}
+        try:
+            for key, value in encrypted_creds.items():
+                if isinstance(value, str):
+                    decrypted_creds[key] = self.decrypt_value(value)
+                else:
+                    decrypted_creds[key] = value
+            return decrypted_creds
+        except Exception as e:
+            self.logger.error(f"Error decrypting credentials: {str(e)}")
+            return encrypted_creds
 
-    def save_credentials(self, credentials: Optional[Dict[str, str]] = None) -> bool:
+    def save_credentials(self, credentials: Optional[Dict[str, Any]] = None) -> bool:
         """
         Save Robinhood credentials securely
         
         Args:
-            credentials (dict, optional): User credentials
-        
+            credentials (dict, optional): Credentials to save
+            
         Returns:
-            bool: True if credentials saved successfully
+            bool: True if successful
         """
         try:
-            # If no credentials provided, prompt user
+            # Get credentials if not provided
             if credentials is None:
                 credentials = self._prompt_for_credentials()
             
             # Validate credentials
             if not self._validate_credentials(credentials):
-                print("Invalid credentials. Please try again.")
+                self.logger.error("Invalid credentials provided")
                 return False
             
-            # Encrypt credentials
-            encrypted_credentials = self.encrypt_credentials(credentials)
+            # Create config structure
+            config = {
+                'credentials': self.encrypt_credentials(credentials),
+                'settings': {
+                    'max_retries': 3,
+                    'timeout': 30,
+                    'debug_mode': False
+                }
+            }
             
-            # Save encrypted credentials
-            with open(self.config_path, 'w') as config_file:
-                json.dump(encrypted_credentials, config_file)
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(self.config_path) if os.path.dirname(self.config_path) else '.', 
+                       exist_ok=True)
             
-            print("Credentials saved securely.")
+            # Save config
+            with open(self.config_path, 'w') as f:
+                json.dump(config, f, indent=4)
+            
+            # Set secure permissions
+            self._set_secure_permissions()
+            
+            self.logger.info("Credentials saved successfully")
             return True
-        
+            
         except Exception as e:
-            logging.error(f"Error saving credentials: {e}")
+            self.logger.error(f"Error saving credentials: {str(e)}")
             return False
+
+    def load_credentials(self) -> Optional[Dict[str, Any]]:
+        """
+        Load and decrypt saved credentials
+        
+        Returns:
+            dict: Decrypted credentials or None if not found/error
+        """
+        try:
+            if not os.path.exists(self.config_path):
+                return None
+            
+            with open(self.config_path, 'r') as f:
+                config = json.load(f)
+            
+            encrypted_creds = config.get('credentials', {})
+            if not encrypted_creds:
+                return None
+            
+            decrypted_creds = self.decrypt_credentials(encrypted_creds)
+            
+            # Validate decrypted credentials
+            if not self._validate_credentials(decrypted_creds):
+                self.logger.warning("Loaded credentials are invalid")
+                return None
+                
+            return decrypted_creds
+            
+        except Exception as e:
+            self.logger.error(f"Error loading credentials: {str(e)}")
+            return None
 
     def _prompt_for_credentials(self) -> Dict[str, str]:
         """
@@ -136,99 +229,106 @@ class RobinhoodAuthenticator:
         Returns:
             dict: User-provided credentials
         """
-        print("Enter your Robinhood credentials (these will be encrypted)")
+        print("\nEnter your Robinhood credentials (these will be encrypted)")
         credentials = {
-            'username': input("Robinhood Username: "),
-            'password': getpass.getpass("Robinhood Password: "),
-            # Optional: MFA token or additional authentication
-            'mfa_token': getpass.getpass("MFA Token (optional): ") or None
+            'username': input("Robinhood Username: ").strip(),
+            'password': getpass.getpass("Robinhood Password: ").strip(),
+            'mfa_token': getpass.getpass("MFA Token (optional, press Enter to skip): ").strip() or None,
+            'device_token': None  # Will be set during authentication
         }
         return credentials
 
-    def _validate_credentials(self, credentials: Dict[str, str]) -> bool:
+    def _validate_credentials(self, credentials: Dict[str, Any]) -> bool:
         """
-        Basic credential validation
+        Validate credential format
         
         Args:
             credentials (dict): Credentials to validate
-        
-        Returns:
-            bool: True if credentials appear valid
-        """
-        # Basic validation checks
-        return all([
-            credentials.get('username'),
-            credentials.get('password')
-        ])
-
-    def load_credentials(self) -> Optional[Dict[str, str]]:
-        """
-        Load and decrypt saved credentials
-        
-        Returns:
-            dict or None: Decrypted credentials or None if not found
-        """
-        try:
-            with open(self.config_path, 'r') as config_file:
-                encrypted_credentials = json.load(config_file)
             
-            return self.decrypt_credentials(encrypted_credentials)
-        
-        except FileNotFoundError:
-            print("No saved credentials found.")
-            return None
-        except Exception as e:
-            logging.error(f"Error loading credentials: {e}")
-            return None
+        Returns:
+            bool: True if valid
+        """
+        # Check for required fields
+        required_fields = ['username', 'password']
+        if not all(field in credentials for field in required_fields):
+            return False
+            
+        # Check for non-empty required values
+        if not all(credentials.get(field) for field in required_fields):
+            return False
+            
+        return True
 
     def remove_credentials(self) -> bool:
         """
-        Securely remove saved credentials
+        Securely remove saved credentials and encryption key
         
         Returns:
-            bool: True if credentials removed successfully
+            bool: True if successful
         """
         try:
             # Remove config file
             if os.path.exists(self.config_path):
                 os.remove(self.config_path)
-            
+                
             # Remove encryption key
-            if os.path.exists(self.encryption_key_path):
-                os.remove(self.encryption_key_path)
-            
-            print("Credentials removed securely.")
+            if os.path.exists(self.key_path):
+                os.remove(self.key_path)
+                
+            self.logger.info("Credentials and encryption key removed successfully")
             return True
-        
+            
         except Exception as e:
-            logging.error(f"Error removing credentials: {e}")
+            self.logger.error(f"Error removing credentials: {str(e)}")
             return False
 
-# Example usage guidance
-def main():
-    auth = RobinhoodAuthenticator()
-    
-    while True:
-        print("\nRobinhood Credential Management")
-        print("1. Save Credentials")
-        print("2. Load Credentials")
-        print("3. Remove Credentials")
-        print("4. Exit")
+    def update_settings(self, settings: Dict[str, Any]) -> bool:
+        """
+        Update authentication settings
         
-        choice = input("Enter your choice (1-4): ")
-        
-        if choice == '1':
-            auth.save_credentials()
-        elif choice == '2':
-            credentials = auth.load_credentials()
-            if credentials:
-                print("Credentials loaded successfully.")
-        elif choice == '3':
-            auth.remove_credentials()
-        elif choice == '4':
-            break
-        else:
-            print("Invalid choice. Please try again.")
+        Args:
+            settings (dict): New settings
+            
+        Returns:
+            bool: True if successful
+        """
+        try:
+            if not os.path.exists(self.config_path):
+                return False
+                
+            with open(self.config_path, 'r') as f:
+                config = json.load(f)
+                
+            config['settings'].update(settings)
+            
+            with open(self.config_path, 'w') as f:
+                json.dump(config, f, indent=4)
+                
+            self._set_secure_permissions()
+            
+            self.logger.info("Settings updated successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error updating settings: {str(e)}")
+            return False
 
-if __name__ == '__main__':
-    main()
+    def get_settings(self) -> Dict[str, Any]:
+        """
+        Get current authentication settings
+        
+        Returns:
+            dict: Current settings
+        """
+        try:
+            if not os.path.exists(self.config_path):
+                return {}
+                
+            with open(self.config_path, 'r') as f:
+                config = json.load(f)
+                
+            return config.get('settings', {})
+            
+        except Exception as e:
+            self.logger.error(f"Error getting settings: {str(e)}")
+            return {}
