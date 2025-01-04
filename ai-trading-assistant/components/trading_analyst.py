@@ -10,8 +10,6 @@ class TradingAnalyst:
         """Initialize Trading Analyst"""
         self.model = model
         self.max_retries = max_retries
-        self.setup_cache = {}
-        self.last_analysis_time = {}
         self.logger = logging.getLogger(__name__)
 
     def _generate_technical_summary(self, data: Dict[str, Any]) -> str:
@@ -47,39 +45,27 @@ class TradingAnalyst:
 
     def generate_prompt(self, data: Dict[str, Any]) -> str:
         """Generate an enhanced prompt for LLM trading analysis"""
-        ta_summary = self._generate_technical_summary(data)
-        volume_analysis = self._analyze_volume_profile(data)
+        return f"""You are an experienced stock trader. Analyze the following stock data.
 
-        prompt = f"""You are an expert AI stock trader. Analyze this stock data and if a valid trading setup exists, respond with it in the EXACT format shown below. If no valid setup exists, respond only with 'NO SETUP'.
+CURRENT STOCK DATA:
+Symbol: {data['symbol']}
+Price: ${data['current_price']:.2f}
+RSI: {data.get('technical_indicators', {}).get('rsi', 'N/A')}
+VWAP: ${data.get('technical_indicators', {}).get('vwap', 'N/A')}
 
-SYMBOL ANALYSIS:
-{ta_summary}
-
-VOLUME PROFILE:
-{volume_analysis}
-
-Here is the EXACT format you must use for a trading setup. STRICTLY follow this format or respond with 'NO SETUP':
-
+If you find a valid trading setup, respond using exactly this format:
 TRADING SETUP: {data['symbol']}
 Entry: $XX.XX
 Target: $XX.XX
 Stop: $XX.XX
 Size: 100
-Reason: Clear and concise reason for trade
+Reason: One line reason
 Confidence: 85%
 Risk-Reward Ratio: 2.5:1
 
-Required format rules:
-1. Must include TRADING SETUP: followed by symbol
-2. Entry/Target/Stop must use $ followed by price
-3. Must include all seven lines exactly as shown
-4. Entry price must be within 20% of current price
-5. Risk-reward must be at least 2:1
-6. Confidence must be between 0-100%
+If you don't find a valid setup, respond only with the text: NO SETUP
 
-If you cannot format the response EXACTLY like this, respond with 'NO SETUP' instead.
-
-Your response:"""
+Your clear and direct response:"""
 
     async def analyze_setup(self, data: Dict[str, Any]) -> Optional[str]:
         """Get trading analysis from LLM with enhanced debugging"""
@@ -193,14 +179,3 @@ Your response:"""
         except Exception as e:
             self.logger.error(f"Setup validation error: {str(e)}\nSetup text: {setup}")
             return False
-
-    def clear_cache(self, symbol: Optional[str] = None) -> None:
-        """Clear analysis cache"""
-        if symbol:
-            self.setup_cache.pop(symbol, None)
-            self.last_analysis_time.pop(symbol, None)
-            self.logger.info(f"Cleared cache for {symbol}")
-        else:
-            self.setup_cache.clear()
-            self.last_analysis_time.clear()
-            self.logger.info("Cleared all cache")
