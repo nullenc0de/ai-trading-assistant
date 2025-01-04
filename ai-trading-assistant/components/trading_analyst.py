@@ -12,40 +12,9 @@ class TradingAnalyst:
         self.max_retries = max_retries
         self.logger = logging.getLogger(__name__)
 
-    def _generate_technical_summary(self, data: Dict[str, Any]) -> str:
-        """Generate technical analysis summary with safety checks"""
-        price = data.get('current_price', 0)
-        rsi = data.get('technical_indicators', {}).get('rsi', 'N/A')
-        vwap = data.get('technical_indicators', {}).get('vwap', 'N/A')
-        sma20 = data.get('technical_indicators', {}).get('sma20', 'N/A')
-        ema9 = data.get('technical_indicators', {}).get('ema9', 'N/A')
-        atr = data.get('technical_indicators', {}).get('atr', 'N/A')
-        
-        return f"""TECHNICAL INDICATORS:
-- Price: ${price:.2f}
-- RSI: {rsi if rsi != 'N/A' else 'Not Available'}
-- VWAP: ${vwap if vwap != 'N/A' else 'Not Available'}
-- SMA20: ${sma20 if sma20 != 'N/A' else 'Not Available'}
-- EMA9: ${ema9 if ema9 != 'N/A' else 'Not Available'}
-- ATR: {atr if atr != 'N/A' else 'Not Available'}"""
-
-    def _analyze_volume_profile(self, data: Dict[str, Any]) -> str:
-        """Analyze volume profile with safety checks"""
-        volume = data.get('volume_analysis', {}).get('current_volume', 0)
-        avg_volume = data.get('volume_analysis', {}).get('avg_volume', 0)
-        volume_ratio = data.get('volume_analysis', {}).get('volume_ratio', 0)
-        market_cap = data.get('market_data', {}).get('market_cap', 0)
-        beta = data.get('market_data', {}).get('beta', 0)
-        
-        return f"""- Current Volume: {volume:,}
-- Average Volume: {avg_volume:,}
-- Relative Volume: {volume_ratio:.1f}x
-- Market Cap: ${market_cap:,}
-- Beta: {beta:.2f}"""
-
     def generate_prompt(self, data: Dict[str, Any]) -> str:
         """Generate an enhanced prompt for LLM trading analysis"""
-        return f"""You are an experienced stock trader. Analyze the following stock data.
+        return f"""You are a skilled stock trader. Analyze this data and provide a trading setup if valid.
 
 CURRENT STOCK DATA:
 Symbol: {data['symbol']}
@@ -53,19 +22,24 @@ Price: ${data['current_price']:.2f}
 RSI: {data.get('technical_indicators', {}).get('rsi', 'N/A')}
 VWAP: ${data.get('technical_indicators', {}).get('vwap', 'N/A')}
 
-If you find a valid trading setup, respond using exactly this format:
+Respond with a trading setup EXACTLY like this example or 'NO SETUP':
+
 TRADING SETUP: {data['symbol']}
 Entry: $XX.XX
 Target: $XX.XX
 Stop: $XX.XX
 Size: X
-Reason: One line reason
-Confidence: X%
+Reason: One clear reason for the trade
+Confidence: XX%
 Risk-Reward Ratio: X:1
 
-If you don't find a valid setup, respond only with the text: NO SETUP
+RULES:
+1. Entry must be within 2% of current price
+2. Risk-Reward ratio must be at least 2:1
+3. Size must be 100 shares for now
+4. Must include all fields exactly as shown
 
-Your clear and direct response:"""
+Your response:"""
 
     async def analyze_setup(self, data: Dict[str, Any]) -> Optional[str]:
         """Get trading analysis from LLM with enhanced debugging"""
@@ -91,10 +65,10 @@ Your clear and direct response:"""
                         model=self.model,
                         prompt=prompt,
                         options={
-                            'temperature': 0.2,  # Lower temperature for more focused responses
-                            'num_predict': 100,  # Limit response length
-                            'top_k': 10,        # More focused sampling
-                            'top_p': 0.5       # More focused responses
+                            'temperature': 0.2,     # More focused responses
+                            'num_predict': 150,     # Keep responses concise
+                            'top_k': 10,
+                            'top_p': 0.5
                         }
                     )
                     
@@ -149,9 +123,13 @@ Your clear and direct response:"""
             
             # Extract values with better error handling
             try:
-                entry_price = float(lines[1].split('$')[1].strip())
-                target_price = float(lines[2].split('$')[1].strip())
-                stop_price = float(lines[3].split('$')[1].strip())
+                for line in lines:
+                    if 'Entry:' in line:
+                        entry_price = float(line.split('$')[1].strip())
+                    elif 'Target:' in line:
+                        target_price = float(line.split('$')[1].strip())
+                    elif 'Stop:' in line:
+                        stop_price = float(line.split('$')[1].strip())
             except (IndexError, ValueError) as e:
                 self.logger.warning(f"Error parsing price values: {e}")
                 return False
