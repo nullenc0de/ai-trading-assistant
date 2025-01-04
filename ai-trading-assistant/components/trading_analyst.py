@@ -84,7 +84,6 @@ Your response:"""
     async def analyze_setup(self, data: Dict[str, Any]) -> Optional[str]:
         """Get trading analysis from LLM with enhanced debugging"""
         symbol = data['symbol']
-        current_time = datetime.now()
 
         try:
             # Basic data validation
@@ -97,7 +96,7 @@ Your response:"""
             prompt = self.generate_prompt(data)
             
             # Log the prompt for debugging
-            self.logger.debug(f"Generated prompt for {symbol}:\n{prompt}")
+            self.logger.info(f"Sending prompt for {symbol}:\n{prompt}")
             
             # Try multiple times if needed
             for attempt in range(self.max_retries):
@@ -106,18 +105,22 @@ Your response:"""
                         model=self.model,
                         prompt=prompt,
                         options={
-                            'temperature': 0.7,
-                            'top_p': 0.9,
-                            'max_tokens': 300,
-                            'stop': ['\n\n', '\n\n\n']
+                            'temperature': 0.2,  # Lower temperature for more focused responses
+                            'num_predict': 100,  # Limit response length
+                            'top_k': 10,        # More focused sampling
+                            'top_p': 0.5       # More focused responses
                         }
                     )
                     
-                    setup = response['response'].strip()
+                    setup = response.get('response', '').strip()
                     
                     # Log the raw response
                     self.logger.info(f"LLM Response for {symbol} (Attempt {attempt + 1}):\n{setup}")
                     
+                    if not setup:
+                        self.logger.warning(f"Empty response for {symbol} on attempt {attempt + 1}")
+                        continue
+                        
                     # Basic format check
                     if not setup.startswith('TRADING SETUP:') and setup != 'NO SETUP':
                         self.logger.warning(f"Invalid response format for {symbol} on attempt {attempt + 1}")
@@ -132,7 +135,7 @@ Your response:"""
                     if attempt == self.max_retries - 1:
                         self.logger.warning(f"All validation attempts failed for {symbol}")
                         return "NO SETUP"
-                    
+                        
                 except Exception as e:
                     self.logger.error(f"Attempt {attempt + 1} failed for {symbol}: {str(e)}")
                     if attempt == self.max_retries - 1:
