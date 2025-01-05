@@ -1,4 +1,3 @@
-# components/trading_analyst.py
 import ollama
 import logging
 from typing import Dict, Optional, Any
@@ -58,7 +57,7 @@ RULES:
 
 Your response:"""
 
-async def analyze_position(self, stock_data: Dict[str, Any], position_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def analyze_position(self, stock_data: Dict[str, Any], position_data: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze existing position and recommend state transition"""
         try:
             # Calculate additional metrics
@@ -292,4 +291,5 @@ Your analysis and decision:"""
             return True
             
         except Exception as e:
-            self
+            self.logger.error(f"Error validating setup: {str(e)}")
+            return False
