@@ -262,8 +262,8 @@ class TradingSystem:
         except Exception as e:
             logging.error(f"Error analyzing {symbol}: {str(e)}")
 
-    async def _handle_position_action(self, symbol: str, action: Dict[str, Any], position: pd.Series, current_data: Dict[str, Any]):
-        """Handle position management actions"""
+async def _handle_position_action(self, symbol: str, action: Dict[str, Any], position: pd.Series, current_data: Dict[str, Any]):
+        """Handle advanced position management actions"""
         try:
             action_type = action.get('action', '').upper()
             
@@ -283,34 +283,72 @@ class TradingSystem:
                 logging.info(f"Closed position in {symbol}: {action.get('reason', 'No reason provided')}")
                 
             elif action_type == 'PARTIAL_EXIT':
-                # Handle partial position exit
-                exit_size = int(position['position_size'] * action.get('exit_percentage', 0.5))
-                remaining_size = position['position_size'] - exit_size
-                
-                # Close part of position
-                exit_data = {
-                    'position_size': remaining_size,
-                    'notes': f"Partial exit ({exit_size} shares): {action.get('reason', 'No reason provided')}"
-                }
-                self.performance_tracker.update_trade(symbol, exit_data)
-                logging.info(f"Partial exit of {exit_size} shares in {symbol}")
+                if 'scale_points' in action and 'sizes' in action:
+                    # Handle scaling out at multiple price points
+                    scale_points = action['scale_points']
+                    sizes = action['sizes']
+                    current_price = current_data['current_price']
+                    
+                    # Find which scale points we've hit
+                    for price, size in zip(scale_points, sizes):
+                        if current_price >= price:
+                            exit_size = int(position['position_size'] * size)
+                            remaining_size = position['position_size'] - exit_size
+                            
+                            # Update position
+                            exit_data = {
+                                'position_size': remaining_size,
+                                'notes': f"Scale out {exit_size} shares at ${price}: {action.get('reason', 'No reason provided')}"
+                            }
+                            self.performance_tracker.update_trade(symbol, exit_data)
+                            logging.info(f"Scaled out {exit_size} shares in {symbol} at ${price}")
+                            
+                else:
+                    # Traditional partial exit
+                    exit_percentage = action.get('exit_percentage', 0.5)
+                    exit_size = int(position['position_size'] * exit_percentage)
+                    remaining_size = position['position_size'] - exit_size
+                    
+                    exit_data = {
+                        'position_size': remaining_size,
+                        'notes': f"Partial exit ({exit_size} shares): {action.get('reason', 'No reason provided')}"
+                    }
+                    self.performance_tracker.update_trade(symbol, exit_data)
+                    logging.info(f"Partial exit of {exit_size} shares in {symbol}")
                 
             elif action_type == 'ADJUST_STOPS':
-                # Update stop loss
-                new_stop = action.get('new_stop')
-                if new_stop:
-                    update_data = {
-                        'stop_price': new_stop,
-                        'notes': f"Stop adjusted to ${new_stop}: {action.get('reason', 'No reason provided')}"
-                    }
-                    self.performance_tracker.update_trade(symbol, update_data)
-                    logging.info(f"Adjusted stop to ${new_stop} for {symbol}")
+                stop_type = action.get('stop_type', 'FIXED')
+                value = action.get('value', 0)
+                current_price = current_data['current_price']
+                entry_price = position['entry_price']
+                
+                if stop_type == 'FIXED':
+                    new_stop = value
+                elif stop_type == 'TRAILING':
+                    # Calculate trailing stop based on percentage
+                    trail_amount = current_price * (value / 100)
+                    new_stop = current_price - trail_amount
+                elif stop_type == 'BREAKEVEN':
+                    # Move stop to entry plus buffer
+                    new_stop = entry_price + value
+                else:
+                    logging.warning(f"Unknown stop type: {stop_type}")
+                    return
+                
+                # Update the stop
+                update_data = {
+                    'stop_price': new_stop,
+                    'notes': f"Stop adjusted to ${new_stop:.2f} ({stop_type}): {action.get('reason', 'No reason provided')}"
+                }
+                self.performance_tracker.update_trade(symbol, update_data)
+                logging.info(f"Adjusted {stop_type} stop to ${new_stop:.2f} for {symbol}")
             
             else:
                 logging.warning(f"Unknown position action type: {action_type}")
                 
         except Exception as e:
             logging.error(f"Error handling position action: {str(e)}")
+            return None
 
     def _parse_trading_setup(self, setup: str) -> Dict[str, Any]:
         """Parse trading setup string into structured data"""
