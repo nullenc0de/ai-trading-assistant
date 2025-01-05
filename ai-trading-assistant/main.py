@@ -158,25 +158,30 @@ class TradingSystem:
             await self._perform_cooldown_tasks()
 
     async def validate_market_conditions(self):
-    """Validate current market conditions"""
-    try:
-        # First check if we're in testing mode with market hours override
-        if (self.config.get('testing_mode', {}).get('enabled', False) and 
-            self.config.get('testing_mode', {}).get('override_market_hours', False)):
-            return True  # Skip market validation in testing mode
+        """Validate current market conditions"""
+        try:
+            # First check if we're in testing mode with market hours override
+            if (self.config.get('testing_mode', {}).get('enabled', False) and 
+                self.config.get('testing_mode', {}).get('override_market_hours', False)):
+                return True  # Skip market validation in testing mode
+                
+            market_status = self.market_monitor.get_market_status()
             
-        market_status = self.market_monitor.get_market_status()
-        
-        if not market_status['is_open']:
-            # Get market check interval from config
-            check_interval = self.config.get('market_check_interval', 60)
+            if not market_status['is_open']:
+                # Get market check interval from config
+                check_interval = self.config.get('market_check_interval', 60)
+                
+                time_until = self.market_monitor.time_until_market_open()
+                logging.info(f"Market closed. Next check in {check_interval} seconds. Time until market open: {time_until}")
+                await asyncio.sleep(check_interval)
+                return False
             
-            time_until = self.market_monitor.time_until_market_open()
-            logging.info(f"Market closed. Next check in {check_interval} seconds. Time until market open: {time_until}")
-            await asyncio.sleep(check_interval)
+            return True
+            
+        except Exception as e:
+            logging.error(f"Error validating market conditions: {str(e)}")
+            await asyncio.sleep(60)  # Wait a minute on error
             return False
-        
-        return True
         
     except Exception as e:
         logging.error(f"Error validating market conditions: {str(e)}")
