@@ -385,6 +385,70 @@ class TradingSystem:
             logging.error(f"Error parsing trading setup: {str(e)}\nSetup text: {setup}")
             return {}
 
+    def _calculate_position_size(self, setup: Dict[str, Any], account_balance: float) -> int:
+        """Calculate position size based on risk management rules
+        
+        Args:
+            setup: Trading setup details including entry, target, and stop prices
+            account_balance: Current account balance
+            
+        Returns:
+            Number of shares to trade
+        """
+        try:
+            # Get risk parameters from config
+            max_risk_per_trade = self.config_manager.get('risk_management.max_risk_per_trade_percent', 1.0) / 100
+            max_position_size = self.config_manager.get('risk_management.max_position_size_percent', 15.0) / 100
+            min_reward_risk_ratio = self.config_manager.get('risk_management.min_reward_risk_ratio', 2.0)
+            
+            entry_price = setup.get('entry_price', 0)
+            stop_price = setup.get('stop_price', 0)
+            target_price = setup.get('target_price', 0)
+            
+            if not all([entry_price, stop_price, target_price]):
+                logging.error("Missing price data for position sizing")
+                return 100  # Default fallback
+            
+            # Calculate risk per share
+            risk_per_share = abs(entry_price - stop_price)
+            if risk_per_share == 0:
+                logging.error("Invalid risk per share (zero)")
+                return 100  # Default fallback
+            
+            # Calculate reward-risk ratio
+            potential_reward = abs(target_price - entry_price)
+            reward_risk_ratio = potential_reward / risk_per_share
+            
+            if reward_risk_ratio < min_reward_risk_ratio:
+                logging.warning(f"Setup reward-risk ratio ({reward_risk_ratio:.2f}) below minimum threshold")
+                return 0
+            
+            # Calculate position size based on account risk
+            max_risk_amount = account_balance * max_risk_per_trade
+            position_size = int(max_risk_amount / risk_per_share)
+            
+            # Limit by max position size
+            max_shares = int((account_balance * max_position_size) / entry_price)
+            position_size = min(position_size, max_shares)
+            
+            # Apply minimum size threshold
+            min_position_size = self.config_manager.get('risk_management.min_position_size', 100)
+            if position_size < min_position_size:
+                logging.info(f"Calculated position size ({position_size}) below minimum threshold")
+                return 0
+                
+            logging.info(f"Position sizing calculation:")
+            logging.info(f"- Risk per share: ${risk_per_share:.2f}")
+            logging.info(f"- Reward-risk ratio: {reward_risk_ratio:.2f}")
+            logging.info(f"- Max risk amount: ${max_risk_amount:.2f}")
+            logging.info(f"- Position size: {position_size} shares")
+            
+            return position_size
+            
+        except Exception as e:
+            logging.error(f"Error calculating position size: {str(e)}")
+            return 100  # Default fallback
+
     async def _execute_trade(self, symbol: str, setup: Dict[str, Any]):
         """Execute trade based on setup details"""
         try:
@@ -399,13 +463,21 @@ class TradingSystem:
             if current_confidence <= min_confidence:
                 logging.info(f"Setup confidence {current_confidence}% below threshold for {symbol}")
                 return
+                
+            # Get account balance and calculate position size
+            account_balance = await self.robinhood_auth.get_account_balance()
+            position_size = self._calculate_position_size(setup, account_balance)
+            
+            if position_size <= 0:
+                logging.info(f"Skipping trade for {symbol} due to position sizing constraints")
+                return
 
             # Add to active trades
             self.active_trades[symbol] = {
                 'entry_price': setup.get('entry_price'),
                 'target_price': setup.get('target_price'),
                 'stop_price': setup.get('stop_price'),
-                'size': setup.get('size'),
+                'size': position_size,
                 'entry_time': datetime.now()
             }
             
