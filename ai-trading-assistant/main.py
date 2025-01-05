@@ -157,19 +157,19 @@ class TradingSystem:
         elif new_state == TradingState.COOLDOWN:
             await self._perform_cooldown_tasks()
 
-    async def validate_market_conditions(self):
+    async def _validate_market_conditions(self):
         """Validate current market conditions"""
         try:
             # First check if we're in testing mode with market hours override
-            if (self.config.get('testing_mode', {}).get('enabled', False) and 
-                self.config.get('testing_mode', {}).get('override_market_hours', False)):
+            if (self.config_manager.config.get('testing_mode', {}).get('enabled', False) and 
+                self.config_manager.config.get('testing_mode', {}).get('override_market_hours', False)):
                 return True  # Skip market validation in testing mode
                 
             market_status = self.market_monitor.get_market_status()
             
             if not market_status['is_open']:
                 # Get market check interval from config
-                check_interval = self.config.get('market_check_interval', 60)
+                check_interval = self.config_manager.config.get('market_check_interval', 60)
                 
                 time_until = self.market_monitor.time_until_market_open()
                 logging.info(f"Market closed. Next check in {check_interval} seconds. Time until market open: {time_until}")
@@ -182,11 +182,6 @@ class TradingSystem:
             logging.error(f"Error validating market conditions: {str(e)}")
             await asyncio.sleep(60)  # Wait a minute on error
             return False
-        
-    except Exception as e:
-        logging.error(f"Error validating market conditions: {str(e)}")
-        await asyncio.sleep(60)  # Wait a minute on error
-        return False
 
     async def analyze_symbol(self, symbol: str):
         """Analyze a single stock symbol and manage existing positions"""
