@@ -3,8 +3,8 @@
     "half_days": [],
     "special_events": [],
     "testing_mode": {
-        "enabled": true,
-        "override_market_hours": true,
+        "enabled": false,
+        "override_market_hours": false,
         "scan_interval": 60
     },
     "market_check_interval": 60,  // How often to check market status (in seconds)
