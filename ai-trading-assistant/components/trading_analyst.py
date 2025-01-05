@@ -58,45 +58,70 @@ RULES:
 
 Your response:"""
 
-    async def analyze_position(self, stock_data: Dict[str, Any], position_data: Dict[str, Any]) -> Dict[str, Any]:
+async def analyze_position(self, stock_data: Dict[str, Any], position_data: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze existing position and recommend state transition"""
         try:
+            # Calculate additional metrics
+            entry_price = position_data['entry_price']
+            current_price = position_data['current_price']
+            position_size = position_data['size']
+            
+            unrealized_pl = (current_price - entry_price) * position_size
+            unrealized_pl_pct = ((current_price / entry_price) - 1) * 100
+            atr = stock_data.get('technical_indicators', {}).get('atr', 'N/A')
+            
             # Generate position analysis prompt
-            prompt = f"""You are managing an existing trading position. Analyze the current market conditions and decide the next state transition.
+            prompt = f"""You are managing an existing trading position. Analyze the current market conditions and decide the next action.
 
 POSITION STATUS:
 Symbol: {stock_data['symbol']}
-Entry Price: ${position_data['entry_price']:.2f}
-Current Price: ${position_data['current_price']:.2f}
+Entry Price: ${entry_price:.2f}
+Current Price: ${current_price:.2f}
 Target Price: ${position_data['target_price']:.2f}
 Stop Price: ${position_data['stop_price']:.2f}
-Position Size: {position_data['size']} shares
+Position Size: {position_size} shares
 Hours Held: {position_data['time_held']:.1f}
 
 CURRENT TECHNICAL DATA:
-Price: ${stock_data['current_price']:.2f}
+Price: ${current_price:.2f}
 RSI: {stock_data.get('technical_indicators', {}).get('rsi', 'N/A')}
 VWAP: ${stock_data.get('technical_indicators', {}).get('vwap', 'N/A')}
+ATR: {atr if atr != 'N/A' else 'Not Available'}
 
-Unrealized P&L: ${(position_data['current_price'] - position_data['entry_price']) * position_data['size']:.2f}
-Unrealized P&L %: {((position_data['current_price'] / position_data['entry_price']) - 1) * 100:.1f}%
+POSITION METRICS:
+Unrealized P&L: ${unrealized_pl:.2f}
+Unrealized P&L %: {unrealized_pl_pct:.1f}%
+Risk Multiple: {abs(unrealized_pl_pct) / abs(((entry_price - position_data['stop_price']) / entry_price) * 100):.1f}R
 
 Choose one of these actions and provide a clear reason:
+
 1. HOLD - Keep the position unchanged
+
 2. EXIT - Close the entire position
-3. PARTIAL_EXIT - Specify exit_percentage (e.g., 0.5 for 50%)
-4. ADJUST_STOPS - Provide new_stop price
+
+3. PARTIAL_EXIT - Advanced profit taking
+   Parameters needed:
+   - exit_percentage: Portion to exit (e.g., 0.5 for 50%)
+   - scale_points: Price levels for scaling out [price1, price2]
+   - sizes: Portion at each scale point [size1, size2]
+
+4. ADJUST_STOPS - Advanced stop management
+   Parameters needed:
+   - type: FIXED, TRAILING, or BREAKEVEN
+   - value: New stop price for FIXED, percentage for TRAILING, buffer for BREAKEVEN
 
 Factors to consider:
 - Position profitability and risk/reward
 - Technical indicators and trend
-- Time held vs typical holding period
+- Time held vs typical holding period (4-6 hours typical for day trade)
 - Price action relative to key levels
+- ATR for volatility-based decisions
+- Overall market conditions
 
 Respond in this EXACT format:
 ACTION: [action type]
 PARAMS: [additional parameters if needed]
-REASON: [One clear reason for this action]
+REASON: [Clear reason incorporating multiple factors]
 
 Your analysis and decision:"""
 
@@ -106,7 +131,7 @@ Your analysis and decision:"""
                 prompt=prompt,
                 options={
                     'temperature': 0.2,
-                    'num_predict': 150
+                    'num_predict': 200  # Increased for longer analysis
                 }
             )
             
@@ -126,11 +151,22 @@ Your analysis and decision:"""
                     params_line = [l for l in lines if 'PARAMS:' in l][0]
                     params_str = params_line.split(':')[1].strip()
                     
-                    # Parse parameters
-                    if 'exit_percentage' in params_str:
-                        action['exit_percentage'] = float(params_str.split('=')[1].strip())
-                    elif 'new_stop' in params_str:
-                        action['new_stop'] = float(params_str.split('=')[1].strip())
+                    # Parse parameters based on action type
+                    if action['action'] == 'PARTIAL_EXIT':
+                        if 'scale_points=' in params_str:
+                            # Extract scale points and sizes
+                            scale_str = params_str.split('scale_points=')[1].split(']')[0] + ']'
+                            sizes_str = params_str.split('sizes=')[1].split(']')[0] + ']'
+                            action['scale_points'] = eval(scale_str)
+                            action['sizes'] = eval(sizes_str)
+                        else:
+                            # Traditional single exit point
+                            action['exit_percentage'] = float(params_str.split('=')[1].strip())
+                    
+                    elif action['action'] == 'ADJUST_STOPS':
+                        params = dict(p.split('=') for p in params_str.split(', '))
+                        action['stop_type'] = params['type'].strip()
+                        action['value'] = float(params['value'].strip())
                 
                 return action
                 
