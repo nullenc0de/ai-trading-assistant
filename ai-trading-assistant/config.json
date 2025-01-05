@@ -18,17 +18,34 @@
     },
     
     "risk_management": {
-        "max_position_size": 1000,
-        "risk_per_trade": 0.02,
+        "max_position_size_percent": 15.0,
+        "max_risk_per_trade_percent": 1.0,
+        "min_position_size": 100,
         "max_daily_trades": 10,
-        "max_daily_loss": 0.03,
-        "profit_taking_intervals": [0.5, 0.75, 1.0]
+        "max_daily_loss_percent": 3.0,
+        "profit_taking_intervals": [0.5, 0.75, 1.0],
+        "min_reward_risk_ratio": 2.0,
+        "scale_out_levels": {
+            "level_1": {
+                "percent_gain": 0.5,
+                "position_size": 0.3
+            },
+            "level_2": {
+                "percent_gain": 0.75,
+                "position_size": 0.3
+            },
+            "level_3": {
+                "percent_gain": 1.0,
+                "position_size": 0.4
+            }
+        }
     },
     
     "trading_rules": {
-        "min_risk_reward": 2.0,
         "min_setup_confidence": 75,
-        "max_spread_percent": 0.02
+        "max_spread_percent": 0.02,
+        "require_volume_confirmation": true,
+        "require_price_confirmation": true
     },
     
     "llm_configuration": {
@@ -40,6 +57,8 @@
     
     "performance_tracking": {
         "log_dir": "performance_logs",
-        "metrics_update_interval": 300
+        "metrics_update_interval": 300,
+        "track_risk_metrics": true,
+        "track_portfolio_metrics": true
     }
 }
