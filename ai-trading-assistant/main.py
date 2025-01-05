@@ -545,7 +545,13 @@ class TradingSystem:
                 symbols = await self.scanner.get_symbols(
                     max_symbols=self.config_manager.get('system_settings.max_symbols', 100)
                 )
-                logging.info(f"Found {len(symbols)} symbols to analyze")
+                
+                # Add active positions to analysis list
+                open_positions = self.performance_tracker.get_open_positions()
+                active_symbols = open_positions['symbol'].tolist()
+                symbols.extend([s for s in active_symbols if s not in symbols])
+                
+                logging.info(f"Found {len(symbols)} symbols to analyze (including {len(active_symbols)} active positions)")
                 
                 if not symbols:
                     logging.warning("No symbols found to analyze")
@@ -571,7 +577,6 @@ class TradingSystem:
             except Exception as e:
                 logging.error(f"Main loop error: {str(e)}")
                 await asyncio.sleep(60)  # Error cooldown
-
 
 def main():
     """Entry point with enhanced error handling"""
