@@ -163,11 +163,12 @@ class TradingSystem:
             market_status = self.market_monitor.get_market_status()
             
             if not market_status['is_open']:
-                time_until = self.market_monitor.time_until_market_open()
-                wait_seconds = min(time_until.seconds, 3600)  # Max wait 1 hour
+                # Get market check interval from config, default to 60 seconds
+                check_interval = self.market_monitor.market_calendar.get('market_check_interval', 60)
                 
-                logging.info(f"Market closed. Waiting {wait_seconds} seconds before next check")
-                await asyncio.sleep(wait_seconds)
+                time_until = self.market_monitor.time_until_market_open()
+                logging.info(f"Market closed. Next check in {check_interval} seconds. Time until market open: {time_until}")
+                await asyncio.sleep(check_interval)
                 return False
             
             return True
