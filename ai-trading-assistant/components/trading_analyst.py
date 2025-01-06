@@ -6,6 +6,14 @@ import json
 
 class TradingAnalyst:
     def __init__(self, performance_tracker, position_manager, model="llama3:latest", max_retries=3):
+        """
+        Initialize the TradingAnalyst with performance tracking and position management.
+
+        :param performance_tracker: Object to track trading performance
+        :param position_manager: Object to manage trading positions
+        :param model: Ollama model to use for analysis (default: llama3:latest)
+        :param max_retries: Maximum number of retry attempts for LLM generation
+        """
         self.model = model
         self.max_retries = max_retries
         self.logger = logging.getLogger(__name__)
@@ -13,6 +21,13 @@ class TradingAnalyst:
         self.position_manager = position_manager
 
     async def analyze_position(self, stock_data: Dict[str, Any], position_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Analyze an existing trading position and determine next action.
+
+        :param stock_data: Current stock market data
+        :param position_data: Current position details
+        :return: Recommended action for the position
+        """
         try:
             entry_price = position_data['entry_price']
             current_price = stock_data['current_price']
@@ -67,6 +82,12 @@ REASON: [explanation]"""
             return {'action': 'HOLD', 'reason': 'Analysis error'}
 
     async def analyze_setup(self, stock_data: Dict[str, Any]) -> str:
+        """
+        Analyze stock data to detect potential trading setups.
+
+        :param stock_data: Stock market and technical data
+        :return: Detailed trading setup or 'NO SETUP FOUND'
+        """
         try:
             prompt = f"""Analyze the following stock data and determine if there is a valid trading setup:
 
@@ -93,6 +114,12 @@ Otherwise, respond with: NO SETUP FOUND
             return "NO SETUP FOUND"
 
     async def _generate_llm_response(self, prompt: str) -> str:
+        """
+        Generate a response from the language model.
+
+        :param prompt: Input prompt for the language model
+        :return: Generated response text
+        """
         try:
             response = ollama.generate(
                 model=self.model,
@@ -108,6 +135,12 @@ Otherwise, respond with: NO SETUP FOUND
             return ""
 
     def _parse_position_action(self, response: str) -> Dict[str, Any]:
+        """
+        Parse the LLM response into a structured action.
+
+        :param response: Raw response text from the language model
+        :return: Parsed action dictionary
+        """
         try:
             lines = response.split('\n')
             action = {
