@@ -80,12 +80,17 @@ class MarketMonitor:
             now = datetime.now(self.timezone)
             current_time = now.time()
             
+            # Check if it's a weekend
+            if now.weekday() >= 5:
+                return 'closed'
+            
             # Check if it's a holiday
             if now.strftime("%Y-%m-%d") in self.market_calendar.get('holidays', []):
                 return 'closed'
             
-            # Check if it's a weekend
-            if now.weekday() >= 5:
+            # After 8 PM or before 4 AM, market is closed
+            if current_time >= self.regular_market_hours['post_market_close'] or \
+               current_time < self.regular_market_hours['pre_market_open']:
                 return 'closed'
             
             # Pre-market (4:00 AM - 9:30 AM ET)
