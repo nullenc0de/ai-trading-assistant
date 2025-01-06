@@ -159,10 +159,14 @@ Important: Do not include '%' with Confidence. Use a numeric value only.
         """
         try:
             lines = response.split('\n')
+            if len(lines) < 1:
+                self.logger.error("Unexpected response format: response is empty")
+                return {'action': 'HOLD', 'reason': 'Parse error'}
+
             action = {
-                'action': lines[0].split(':')[1].strip(),
+                'action': lines[0].split(':')[1].strip() if len(lines[0].split(':')) > 1 else 'HOLD',
                 'params': lines[1].split(':')[1].strip() if len(lines) > 1 and 'PARAMS:' in lines[1] else None, 
-                'reason': lines[-1].split(':')[1].strip() if len(lines) > 2 else ''
+                'reason': lines[-1].split(':')[1].strip() if len(lines) > 2 else 'Parse error'
             }
             return action
         except Exception as e:
