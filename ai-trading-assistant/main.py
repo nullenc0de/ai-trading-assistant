@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import re
-from typing import Dict, Any
+from typing import Dict, Any, List
 from datetime import datetime
 import pandas as pd
 from enum import Enum, auto
@@ -36,12 +36,18 @@ class TradingSystem:
             'trades_analyzed': 0,
             'setups_detected': 0,
             'trades_executed': 0,
-            'successful_trades': 0
+            'successful_trades': 0,
+            'daily_watchlist': []
         }
 
     def _setup_logging(self):
         os.makedirs('logs', exist_ok=True)
         handlers = []
+        
+        file_handler = logging.FileHandler('logs/trading_system.log')
+        file_handler.setLevel(logging.INFO)
+        file_handler.setFormatter(logging.Formatter('%(asctime)s - [%(levelname)s] - %(name)s - %(message)s'))
+        handlers.append(file_handler)
         
         debug_handler = logging.FileHandler('logs/trading_system_debug.log')
         debug_handler.setLevel(logging.DEBUG)
@@ -102,34 +108,6 @@ class TradingSystem:
             logging.error(f"Auth error: {str(e)}")
             print("Error setting up Robinhood. Running in analysis-only mode.")
 
-    async def _update_state(self, new_state: TradingState):
-        old_state = self.current_state
-        self.current_state = new_state
-        logging.info(f"State transition: {old_state.name} -> {new_state.name}")
-        
-        if new_state == TradingState.MARKET_SCANNING:
-            await self._validate_market_conditions()
-        elif new_state == TradingState.COOLDOWN:
-            await self._perform_cooldown_tasks()
-
-    async def _validate_market_conditions(self):
-        try:
-            if self.config_manager.config.get('testing_mode', {}).get('enabled', False):
-                return True
-                
-            market_status = self.market_monitor.get_market_status()
-            if not market_status['is_open']:
-                check_interval = self.config_manager.config.get('market_check_interval', 60)
-                time_until = self.market_monitor.time_until_market_open()
-                logging.info(f"Market closed. Check in {check_interval}s. Opens in: {time_until}")
-                await asyncio.sleep(check_interval)
-                return False
-            return True
-        except Exception as e:
-            logging.error(f"Market validation error: {str(e)}")
-            await asyncio.sleep(60)
-            return False
-
     async def analyze_symbol(self, symbol: str):
         try:
             self.metrics['trades_analyzed'] += 1
@@ -159,6 +137,11 @@ class TradingSystem:
                         'time_held': (datetime.now() - pd.to_datetime(position['timestamp'])).total_seconds() / 3600
                     }
                 )
+                return
+
+            # Only analyze for new setups during regular market hours unless in testing mode
+            market_phase = self.market_monitor.get_market_phase()
+            if market_phase != 'regular' and not self.config_manager.get('testing_mode.enabled', False):
                 return
 
             trading_setup = await self.trading_analyst.analyze_setup(stock_data)
@@ -191,130 +174,128 @@ class TradingSystem:
         except Exception as e:
             logging.error(f"Symbol analysis error: {str(e)}")
 
-    def _parse_trading_setup(self, setup: str) -> Dict[str, Any]:
+    async def _analyze_premarket_movers(self, symbols: List[str]):
+        """Analyze pre-market movers and prepare watchlist"""
         try:
-            setup_dict = {}
-            lines = setup.strip().split('\n')
-            
-            for line in lines:
-                if ':' in line:
-                    key, value = line.split(':', 1)
-                    key = key.strip().lower()
-                    value = value.strip()
+            premarket_movers = []
+            for symbol in symbols:
+                stock_data = self.analyzer.analyze_stock(symbol)
+                if not stock_data:
+                    continue
                     
-                    try:
-                        # Symbol
-                        if 'symbol' in key:
-                            setup_dict['symbol'] = value
-                        
-                        # Numeric values with robust parsing
-                        elif any(prefix in key for prefix in ['entry', 'target', 'stop']):
-                            value = value.lstrip('$')
-                            try:
-                                numeric_value = float(value)
-                                setup_dict[key.replace(' ', '_')] = numeric_value
-                            except ValueError:
-                                logging.warning(f"Could not parse {key}: {value}")
-                        
-                        # Confidence
-                        elif 'confidence' in key:
-                            value = value.rstrip('%')
-                            try:
-                                setup_dict['confidence'] = float(value)
-                            except ValueError:
-                                logging.warning(f"Invalid confidence: {value}")
-                        
-                        # Size handling
-                        elif 'size' in key:
-                            # Extract numeric value if possible
-                            try:
-                                # Try to find numeric part, handle percentage or fixed size
-                                if '%' in value.lower():
-                                    matches = re.findall(r'([\d.]+)\s*%', value)
-                                    if matches:
-                                        setup_dict['size'] = float(matches[0])
-                                else:
-                                    setup_dict['size'] = float(re.findall(r'[\d.]+', value)[0])
-                            except:
-                                setup_dict['size'] = value
-                        
-                        # Risk/Reward
-                        elif 'risk/reward' in key:
-                            setup_dict['risk_reward'] = value
-                        
-                        # Reason
-                        elif 'reason' in key:
-                            setup_dict['reason'] = value
-                    
-                    except Exception as ve:
-                        logging.error(f"Error parsing {key}: {value} - {ve}")
+                # Calculate pre-market change
+                current_price = stock_data['current_price']
+                prev_close = stock_data.get('previous_close', current_price)
+                change_pct = ((current_price - prev_close) / prev_close) * 100
+                volume = stock_data.get('volume_analysis', {}).get('current_volume', 0)
+                avg_volume = stock_data.get('volume_analysis', {}).get('avg_volume', 1)
+                rel_volume = volume / avg_volume if avg_volume > 0 else 0
+                
+                # Track significant pre-market activity
+                if abs(change_pct) >= 3.0 or rel_volume >= 2.0:
+                    premarket_movers.append({
+                        'symbol': symbol,
+                        'price': current_price,
+                        'change_pct': change_pct,
+                        'volume': volume,
+                        'rel_volume': rel_volume,
+                        'technical_indicators': stock_data.get('technical_indicators', {})
+                    })
             
-            return setup_dict
+            if premarket_movers:
+                logging.info("\nPre-market Movers:")
+                for mover in sorted(premarket_movers, key=lambda x: abs(x['change_pct']), reverse=True):
+                    logging.info(
+                        f"{mover['symbol']}: {mover['change_pct']:+.1f}% | "
+                        f"${mover['price']:.2f} | {mover['rel_volume']:.1f}x Volume"
+                    )
+                
+                # Update watchlist for regular session
+                self.metrics['daily_watchlist'] = [m['symbol'] for m in premarket_movers]
         
         except Exception as e:
-            logging.error(f"Setup parsing error: {str(e)}")
-            return {}
+            logging.error(f"Pre-market analysis error: {str(e)}")
 
-    async def _execute_trade(self, symbol: str, setup: Dict[str, Any]):
+    async def _generate_eod_report(self):
+        """Generate end-of-day analysis and watchlist"""
         try:
-            min_confidence = self.config_manager.get('trading_rules.min_setup_confidence', 75)
-            if setup.get('confidence', 0) <= min_confidence:
-                logging.info(f"Setup confidence {setup.get('confidence')}% below threshold")
-                return
+            # Get today's performance
+            report = self.performance_tracker.generate_report(days=1)
+            logging.info(f"\nEnd of Day Report:\n{report}")
+            
+            # Analyze closed positions
+            closed_positions = self.performance_tracker.get_trade_history(days=1)
+            if not closed_positions.empty:
+                win_rate = (closed_positions['profit_loss'] > 0).mean() * 100
+                total_pl = closed_positions['profit_loss'].sum()
+                avg_hold_time = closed_positions['time_held'].mean() if 'time_held' in closed_positions else 0
                 
-            self.active_trades[symbol] = {
-                'entry_price': setup.get('entry', setup.get('entry_price')),
-                'target_price': setup.get('target', setup.get('target_price')),
-                'stop_price': setup.get('stop', setup.get('stop_price')),
-                'size': setup.get('size', 100),
-                'entry_time': datetime.now()
-            }
+                logging.info(f"\nToday's Trading Summary:")
+                logging.info(f"Win Rate: {win_rate:.1f}%")
+                logging.info(f"Total P&L: ${total_pl:.2f}")
+                logging.info(f"Average Hold Time: {avg_hold_time:.1f} hours")
+                logging.info(f"Total Trades: {len(closed_positions)}")
             
-            logging.info(f"Paper trade executed for {symbol}:")
-            for key, value in setup.items():
-                logging.info(f"- {key}: {value}")
+            # Prepare for next session
+            self.metrics.update({
+                'trades_analyzed': 0,
+                'setups_detected': 0,
+                'trades_executed': 0,
+                'successful_trades': 0,
+                'daily_watchlist': []
+            })
             
-        except Exception as e:
-            logging.error(f"Trade execution error: {str(e)}")
-
-    async def _perform_cooldown_tasks(self):
-        try:
-            report = self.performance_tracker.generate_report()
-            logging.info(f"Performance Report:\n{report}")
-            
-            if self.metrics['trades_executed'] > 0:
-                success_rate = (self.metrics['successful_trades'] / self.metrics['trades_executed']) * 100
-                logging.info(f"Current success rate: {success_rate:.2f}%")
-            
-            logging.info("Performance Metrics:")
-            for metric, value in self.metrics.items():
-                logging.info(f"- {metric}: {value}")
-            
-            self.active_trades.clear()
-            await asyncio.sleep(30)
+            # Clear caches
+            self.analyzer.clear_cache()
+            self.scanner.clear_cache()
             
         except Exception as e:
-            logging.error(f"Cooldown error: {str(e)}")
+            logging.error(f"EOD report error: {str(e)}")
 
     async def run(self):
         while True:
             try:
                 await self._update_state(TradingState.INITIALIZATION)
                 
-                if not await self._validate_market_conditions():
+                market_phase = self.market_monitor.get_market_phase()
+                
+                if market_phase == 'closed':
+                    logging.info("Market closed. Waiting for next session...")
+                    await asyncio.sleep(300)  # Check every 5 minutes
+                    continue
+                    
+                elif market_phase == 'pre-market':
+                    logging.info("Pre-market session. Running pre-market scan...")
+                    # Reduced scanning frequency, focus on gap analysis
+                    symbols = await self.scanner.get_symbols(max_symbols=50)
+                    await self._analyze_premarket_movers(symbols)
+                    await asyncio.sleep(300)  # 5-minute delay between pre-market scans
+                    continue
+                    
+                elif market_phase == 'post-market':
+                    logging.info("Post-market session. Generating end-of-day report...")
+                    await self._generate_eod_report()
+                    await asyncio.sleep(300)  # 5-minute delay between post-market checks
                     continue
                 
+                # Regular market hours processing
                 await self._update_state(TradingState.MARKET_SCANNING)
                 
                 symbols = await self.scanner.get_symbols(
                     max_symbols=self.config_manager.get('system_settings.max_symbols', 100)
                 )
                 
+                # Add symbols from daily watchlist
+                watchlist_symbols = [s for s in self.metrics['daily_watchlist'] if s not in symbols]
+                symbols.extend(watchlist_symbols)
+                
+                # Add symbols from open positions
                 open_positions = self.performance_tracker.get_open_positions()
                 active_symbols = open_positions['symbol'].tolist()
                 symbols.extend([s for s in active_symbols if s not in symbols])
                 
-                logging.info(f"Analyzing {len(symbols)} symbols ({len(active_symbols)} active)")
+                logging.info(f"Analyzing {len(symbols)} symbols "
+                           f"({len(active_symbols)} active, {len(watchlist_symbols)} watchlist)")
                 
                 if not symbols:
                     await asyncio.sleep(60)
@@ -337,19 +318,3 @@ class TradingSystem:
             except Exception as e:
                 logging.error(f"Main loop error: {str(e)}")
                 await asyncio.sleep(60)
-
-def main():
-    try:
-        trading_system = TradingSystem()
-        asyncio.run(trading_system.run())
-    except KeyboardInterrupt:
-        print("\nTrading system stopped by user.")
-        logging.info("User initiated shutdown")
-    except Exception as e:
-        logging.critical(f"Fatal error: {str(e)}")
-        raise
-    finally:
-        logging.info("Trading system shutdown complete")
-
-if __name__ == "__main__":
-    main()
