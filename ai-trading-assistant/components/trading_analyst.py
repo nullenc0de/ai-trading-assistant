@@ -6,13 +6,11 @@ from datetime import datetime
 
 class TradingAnalyst:
     def __init__(self, model="llama3:latest", max_retries=3):
-        """Initialize Trading Analyst"""
         self.model = model
         self.max_retries = max_retries
         self.logger = logging.getLogger(__name__)
 
     def _generate_technical_summary(self, data: Dict[str, Any]) -> str:
-        """Generate technical analysis summary with safety checks"""
         price = data.get('current_price', 0)
         rsi = data.get('technical_indicators', {}).get('rsi', 'N/A')
         vwap = data.get('technical_indicators', {}).get('vwap', 'N/A')
@@ -29,7 +27,6 @@ class TradingAnalyst:
 - ATR: {atr if atr != 'N/A' else 'Not Available'}"""
 
     def generate_prompt(self, data: Dict[str, Any]) -> str:
-        """Generate an enhanced prompt for LLM trading analysis"""
         return f"""You are a skilled stock trader. Analyze this data and provide a trading setup if valid.
 
 CURRENT STOCK DATA:
@@ -58,9 +55,7 @@ RULES:
 Your response:"""
 
     async def analyze_position(self, stock_data: Dict[str, Any], position_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Analyze existing position and recommend state transition"""
         try:
-            # Calculate additional metrics
             entry_price = position_data['entry_price']
             current_price = position_data['current_price']
             position_size = position_data['size']
@@ -69,7 +64,6 @@ Your response:"""
             unrealized_pl_pct = ((current_price / entry_price) - 1) * 100
             atr = stock_data.get('technical_indicators', {}).get('atr', 'N/A')
             
-            # Generate position analysis prompt
             prompt = f"""You are managing an existing trading position. Analyze the current market conditions and decide the next action.
 
 POSITION STATUS:
@@ -109,155 +103,107 @@ Choose one of these actions and provide a clear reason:
    - type: FIXED, TRAILING, or BREAKEVEN
    - value: New stop price for FIXED, percentage for TRAILING, buffer for BREAKEVEN
 
-Factors to consider:
-- Position profitability and risk/reward
-- Technical indicators and trend
-- Time held vs typical holding period (4-6 hours typical for day trade)
-- Price action relative to key levels
-- ATR for volatility-based decisions
-- Overall market conditions
-
 Respond in this EXACT format:
 ACTION: [action type]
-PARAMS: [additional parameters if needed]
-REASON: [Clear reason incorporating multiple factors]
+PARAMS: [parameters if needed]
+REASON: [Clear explanation incorporating multiple factors]
 
 Your analysis and decision:"""
 
-            # Get LLM response
-            response = ollama.generate(
-                model=self.model,
-                prompt=prompt,
-                options={
-                    'temperature': 0.2,
-                    'num_predict': 200  # Increased for longer analysis
-                }
-            )
+            response = await self._generate_llm_response(prompt)
+            action_text = response.strip()
             
-            action_text = response.get('response', '').strip()
-            self.logger.info(f"Position analysis for {stock_data['symbol']}:\n{action_text}")
-            
-            # Parse action
             try:
                 lines = action_text.split('\n')
                 action = {
                     'action': lines[0].split(':')[1].strip(),
+                    'params': lines[1].split(':')[1].strip() if len(lines) > 1 and 'PARAMS:' in lines[1] else None,
                     'reason': lines[-1].split(':')[1].strip()
                 }
-                
-                # Parse additional parameters if present
-                if 'PARAMS:' in action_text:
-                    params_line = [l for l in lines if 'PARAMS:' in l][0]
-                    params_str = params_line.split(':')[1].strip()
-                    
-                    # Parse parameters based on action type
-                    if action['action'] == 'PARTIAL_EXIT':
-                        if 'scale_points=' in params_str:
-                            # Extract scale points and sizes
-                            scale_str = params_str.split('scale_points=')[1].split(']')[0] + ']'
-                            sizes_str = params_str.split('sizes=')[1].split(']')[0] + ']'
-                            action['scale_points'] = eval(scale_str)
-                            action['sizes'] = eval(sizes_str)
-                        else:
-                            # Traditional single exit point
-                            action['exit_percentage'] = float(params_str.split('=')[1].strip())
-                    
-                    elif action['action'] == 'ADJUST_STOPS':
-                        params = dict(p.split('=') for p in params_str.split(', '))
-                        action['stop_type'] = params['type'].strip()
-                        action['value'] = float(params['value'].strip())
-                
                 return action
                 
             except Exception as e:
                 self.logger.error(f"Error parsing position action: {str(e)}")
                 return None
-            
+
         except Exception as e:
             self.logger.error(f"Error analyzing position: {str(e)}")
             return None
 
     async def analyze_setup(self, data: Dict[str, Any]) -> Optional[str]:
-        """Get trading analysis from LLM with enhanced debugging"""
         symbol = data['symbol']
 
         try:
-            # Basic data validation
             required_fields = ['current_price', 'symbol']
             if not all(data.get(field) for field in required_fields):
                 self.logger.warning(f"Missing required data fields for {symbol}")
                 return "NO SETUP"
 
-            # Generate prompt
             prompt = self.generate_prompt(data)
-            
-            # Log the prompt for debugging
             self.logger.info(f"Sending prompt for {symbol}:\n{prompt}")
             
-            # Try multiple times if needed
             for attempt in range(self.max_retries):
                 try:
-                    response = ollama.generate(
-                        model=self.model,
-                        prompt=prompt,
-                        options={
-                            'temperature': 0.2,
-                            'num_predict': 150,
-                            'top_k': 10,
-                            'top_p': 0.5
-                        }
-                    )
+                    response = await self._generate_llm_response(prompt)
+                    setup = response.strip()
                     
-                    setup = response.get('response', '').strip()
-                    
-                    # Log the raw response
                     self.logger.info(f"LLM Response for {symbol} (Attempt {attempt + 1}):\n{setup}")
                     
                     if not setup:
-                        self.logger.warning(f"Empty response for {symbol} on attempt {attempt + 1}")
                         continue
                         
-                    # Basic format check
                     if not setup.startswith('TRADING SETUP:') and setup != 'NO SETUP':
-                        self.logger.warning(f"Invalid response format for {symbol} on attempt {attempt + 1}")
                         if attempt == self.max_retries - 1:
                             return "NO SETUP"
                         continue
                     
-                    # Validate setup
                     if setup == 'NO SETUP' or self._validate_setup(setup, data):
                         return setup
                     
                     if attempt == self.max_retries - 1:
-                        self.logger.warning(f"All validation attempts failed for {symbol}")
                         return "NO SETUP"
                         
                 except Exception as e:
                     self.logger.error(f"Attempt {attempt + 1} failed for {symbol}: {str(e)}")
                     if attempt == self.max_retries - 1:
                         return "NO SETUP"
-                    await asyncio.sleep(1)  # Brief pause between retries
+                    await asyncio.sleep(1)
                     
         except Exception as e:
             self.logger.error(f"Error analyzing setup for {symbol}: {str(e)}")
             return "NO SETUP"
 
+    async def _generate_llm_response(self, prompt: str) -> str:
+        try:
+            response = ollama.generate(
+                model=self.model,
+                prompt=prompt,
+                options={
+                    'temperature': 0.2,
+                    'num_predict': 150,
+                    'top_k': 10,
+                    'top_p': 0.5
+                }
+            )
+            
+            return response.get('response', '').strip()
+            
+        except Exception as e:
+            self.logger.error(f"Error generating LLM response: {str(e)}")
+            return ""
+
     def _validate_setup(self, setup: str, data: Dict[str, Any]) -> bool:
-        """Validate trading setup meets requirements"""
         try:
             if setup == 'NO SETUP':
                 return True
             
-            # Log the setup being validated
             self.logger.debug(f"Validating setup: {setup}")
             
-            # Split into lines and check minimum length
             lines = setup.split('\n')
-            if len(lines) < 7:  # Need at least 7 lines for a valid setup
+            if len(lines) < 7:
                 self.logger.warning("Setup has insufficient lines")
                 return False
             
-            # Extract values with better error handling
             try:
                 for line in lines:
                     if 'Entry:' in line:
@@ -270,13 +216,11 @@ Your analysis and decision:"""
                 self.logger.warning(f"Error parsing price values: {e}")
                 return False
             
-            # Validate prices are reasonable
             current_price = data['current_price']
             if not (0.8 * current_price <= entry_price <= 1.2 * current_price):
                 self.logger.warning(f"Entry price {entry_price} too far from current price {current_price}")
                 return False
             
-            # Validate risk/reward
             risk = abs(entry_price - stop_price)
             reward = abs(target_price - entry_price)
             if risk == 0:
@@ -284,7 +228,7 @@ Your analysis and decision:"""
                 return False
                 
             risk_reward = reward / risk
-            if risk_reward < 2:  # Minimum 2:1 reward/risk
+            if risk_reward < 2:
                 self.logger.warning(f"Risk/reward ratio {risk_reward} below minimum")
                 return False
             
