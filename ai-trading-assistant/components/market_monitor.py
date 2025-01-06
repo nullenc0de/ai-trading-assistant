@@ -18,12 +18,15 @@ class MarketMonitor:
         self.config_path = config_path or 'market_calendar.json'
         self.logger = logging.getLogger(__name__)
         
-        # Market hours configuration
+        # Market hours configuration (all times in ET)
+        current_time = datetime.now(self.timezone).strftime('%H:%M:%S %Z')
+        self.logger.info(f"Initializing market monitor. Current time: {current_time}")
+        
         self.regular_market_hours = {
-            'open': time(9, 30),   # 9:30 AM
-            'close': time(16, 0),  # 4:00 PM
-            'pre_market_open': time(4, 0),    # 4:00 AM
-            'post_market_close': time(20, 0)  # 8:00 PM
+            'pre_market_open': time(4, 0),    # 4:00 AM ET
+            'open': time(9, 30),              # 9:30 AM ET
+            'close': time(16, 0),             # 4:00 PM ET
+            'post_market_close': time(20, 0)  # 8:00 PM ET
         }
         
         # Initialize market calendar
@@ -77,14 +80,10 @@ class MarketMonitor:
             if self.market_calendar.get('testing_mode', {}).get('enabled', False):
                 return 'regular'
             
+            # Get current time in Eastern timezone
             now = datetime.now(self.timezone)
             current_time = now.time()
             
-            # First check if we're in overnight hours (8 PM - 4 AM)
-            if current_time >= self.regular_market_hours['post_market_close'] or \
-               current_time < self.regular_market_hours['pre_market_open']:
-                return 'closed'
-
             # Then check if it's a weekend
             if now.weekday() >= 5:
                 return 'closed'
@@ -93,8 +92,16 @@ class MarketMonitor:
             if now.strftime("%Y-%m-%d") in self.market_calendar.get('holidays', []):
                 return 'closed'
             
+            # Evening cutoff is 8 PM Eastern
+            evening_cutoff = self.regular_market_hours['post_market_close']
+            morning_start = self.regular_market_hours['pre_market_open']
+            
+            # After 8 PM and before 4 AM next day, market is closed
+            if current_time >= evening_cutoff or current_time < morning_start:
+                return 'closed'
+            
             # Pre-market (4:00 AM - 9:30 AM ET)
-            if self.regular_market_hours['pre_market_open'] <= current_time < self.regular_market_hours['open']:
+            if morning_start <= current_time < self.regular_market_hours['open']:
                 return 'pre-market'
             
             # Regular hours (9:30 AM - 4:00 PM ET)
@@ -102,7 +109,7 @@ class MarketMonitor:
                 return 'regular'
             
             # Post-market (4:00 PM - 8:00 PM ET)
-            elif self.regular_market_hours['close'] <= current_time < self.regular_market_hours['post_market_close']:
+            elif self.regular_market_hours['close'] <= current_time < evening_cutoff:
                 return 'post-market'
             
             return 'closed'
