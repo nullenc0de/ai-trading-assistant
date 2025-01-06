@@ -2,6 +2,7 @@ import logging
 from typing import Dict, Any
 import ollama
 from datetime import datetime
+import json
 
 class TradingAnalyst:
     def __init__(self, performance_tracker, position_manager, model="llama3:latest", max_retries=3):
