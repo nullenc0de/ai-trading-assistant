@@ -100,11 +100,11 @@ Entry: $[entry price]
 Target: $[price target]
 Stop: $[stop loss]
 Size: [position size]
-Confidence: [setup confidence %]
+Confidence: [numeric confidence percentage, not followed by %]
 Risk/Reward: [risk/reward ratio]  
 Reason: [detailed explanation]
 
-Otherwise, respond with: NO SETUP FOUND  
+Important: Do not include '%' with Confidence. Use a numeric value only.
 """
             response = await self._generate_llm_response(prompt)
             return response
@@ -134,47 +134,72 @@ Otherwise, respond with: NO SETUP FOUND
             self.logger.error(f"LLM error: {str(e)}")
             return ""
 
+    def _parse_position_action(self, response: str) -> Dict[str, Any]:
+        """
+        Parse the LLM response into a structured action.
+
+        :param response: Raw response text from the language model
+        :return: Parsed action dictionary
+        """
+        try:
+            lines = response.split('\n')
+            action = {
+                'action': lines[0].split(':')[1].strip(),
+                'params': lines[1].split(':')[1].strip() if len(lines) > 1 and 'PARAMS:' in lines[1] else None, 
+                'reason': lines[-1].split(':')[1].strip() if len(lines) > 2 else ''
+            }
+            return action
+        except Exception as e:
+            self.logger.error(f"Action parse error: {str(e)}")
+            return {'action': 'HOLD', 'reason': 'Parse error'}
+
     def _parse_setup(self, response: str) -> Dict[str, Any]:
-    """
-    Parse trading setup with robust handling of percentage values
-    
-    Args:
-        response (str): Raw setup response
-    
-    Returns:
-        dict: Parsed setup details
-    """
-    try:
-        setup = {}
-        lines = response.strip().split('\n')
+        """
+        Parse trading setup with robust handling of percentage values
         
-        for line in lines:
-            if ':' in line:
-                key, value = line.split(':', 1)
-                key = key.strip().lower()
-                value = value.strip()
-                
-                # Handle percentage parsing
-                if 'confidence' in key:
-                    # Remove % sign and convert to float
-                    value = value.rstrip('%')
-                    setup['confidence'] = float(value)
-                
-                # Handle currency values
-                elif any(prefix in key for prefix in ['entry', 'target', 'stop']):
-                    # Remove $ sign and convert to float
-                    value = value.lstrip('$')
-                    setup[key.replace(' ', '_')] = float(value)
-                
-                # Handle other numeric values
-                else:
-                    try:
-                        setup[key.replace(' ', '_')] = int(value)
-                    except ValueError:
-                        setup[key.replace(' ', '_')] = value
+        Args:
+            response (str): Raw setup response
         
-        return setup
-    
-    except Exception as e:
-        logging.error(f"Setup parsing error: {str(e)}")
-        return {}
+        Returns:
+            dict: Parsed setup details
+        """
+        try:
+            setup = {}
+            lines = response.strip().split('\n')
+            
+            for line in lines:
+                if ':' in line:
+                    key, value = line.split(':', 1)
+                    key = key.strip().lower()
+                    value = value.strip()
+                    
+                    # Handle percentage parsing
+                    if 'confidence' in key:
+                        # Remove % sign and convert to float
+                        value = value.rstrip('%')
+                        try:
+                            setup['confidence'] = float(value)
+                        except ValueError:
+                            self.logger.warning(f"Invalid confidence value: {value}")
+                    
+                    # Handle currency values
+                    elif any(prefix in key for prefix in ['entry', 'target', 'stop']):
+                        # Remove $ sign and convert to float
+                        value = value.lstrip('$')
+                        try:
+                            setup[key.replace(' ', '_')] = float(value)
+                        except ValueError:
+                            self.logger.warning(f"Invalid price value for {key}: {value}")
+                    
+                    # Handle other numeric values
+                    else:
+                        try:
+                            setup[key.replace(' ', '_')] = int(value)
+                        except ValueError:
+                            setup[key.replace(' ', '_')] = value
+            
+            return setup
+        
+        except Exception as e:
+            self.logger.error(f"Setup parsing error: {str(e)}")
+            return {}
