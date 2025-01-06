@@ -342,9 +342,16 @@ class TradingSystem:
                 await self._update_state(TradingState.INITIALIZATION)
                 
                 market_phase = self.market_monitor.get_market_phase()
+                market_status = self.market_monitor.get_market_status()
                 
                 if market_phase == 'closed':
-                    logging.info("Market closed. Waiting for next session...")
+                    time_until_open = self.market_monitor.time_until_market_open()
+                    if market_status['is_weekend']:
+                        logging.info("Market closed for weekend.")
+                    elif market_status['today_is_holiday']:
+                        logging.info("Market closed for holiday.")
+                    else:
+                        logging.info(f"Market closed. Next session begins in {time_until_open.total_seconds() / 3600:.1f} hours")
                     await asyncio.sleep(300)  # Check every 5 minutes
                     continue
                     
@@ -359,7 +366,8 @@ class TradingSystem:
                 elif market_phase == 'post-market':
                     logging.info("Post-market session. Generating end-of-day report...")
                     await self._generate_eod_report()
-                    await asyncio.sleep(300)  # 5-minute delay between post-market checks
+                    # After EOD report, transition to closed state
+                    await asyncio.sleep(300)
                     continue
                 
                 # Regular market hours processing
