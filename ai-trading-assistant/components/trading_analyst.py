@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Dict, Any
 import ollama
 from datetime import datetime
@@ -31,7 +32,22 @@ class TradingAnalyst:
         try:
             entry_price = position_data['entry_price']
             current_price = stock_data['current_price']
+            
+            # Robust size handling
             position_size = position_data['size']
+            if isinstance(position_size, str):
+                try:
+                    # Handle percentage or fixed size
+                    if '%' in position_size.lower():
+                        matches = re.findall(r'([\d.]+)\s*%', position_size)
+                        position_size = float(matches[0]) if matches else 100
+                    else:
+                        position_size = float(re.findall(r'[\d.]+', position_size)[0])
+                except:
+                    position_size = 100
+            
+            # Ensure position_size is a numeric value
+            position_size = float(position_size)
             
             unrealized_pl = (current_price - entry_price) * position_size
             unrealized_pl_pct = ((current_price / entry_price) - 1) * 100
@@ -99,7 +115,7 @@ Symbol: [symbol]
 Entry: $[entry price]  
 Target: $[price target]
 Stop: $[stop loss]
-Size: [position size]
+Size: [position size as percentage or fixed amount]
 Confidence: [numeric confidence percentage, not followed by %]
 Risk/Reward: [risk/reward ratio]  
 Reason: [detailed explanation]
@@ -191,10 +207,31 @@ Important: Do not include '%' with Confidence. Use a numeric value only.
                         except ValueError:
                             self.logger.warning(f"Invalid price value for {key}: {value}")
                     
-                    # Handle other numeric values
+                    # Handle size with percentage support
+                    elif 'size' in key:
+                        try:
+                            # Handle percentage or fixed size
+                            if '%' in value.lower():
+                                matches = re.findall(r'([\d.]+)\s*%', value)
+                                setup['size'] = float(matches[0]) if matches else 100
+                            else:
+                                # Try to extract numeric value
+                                setup['size'] = float(re.findall(r'[\d.]+', value)[0])
+                        except:
+                            setup['size'] = value
+                    
+                    # Handle risk/reward
+                    elif 'risk/reward' in key:
+                        setup['risk_reward'] = value
+                    
+                    # Handle reason or other text fields
+                    elif 'reason' in key:
+                        setup['reason'] = value
+                    
+                    # Fallback for other numeric or text values
                     else:
                         try:
-                            setup[key.replace(' ', '_')] = int(value)
+                            setup[key.replace(' ', '_')] = float(value)
                         except ValueError:
                             setup[key.replace(' ', '_')] = value
             
