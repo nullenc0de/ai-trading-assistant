@@ -191,31 +191,49 @@ class TradingSystem:
             logging.error(f"Symbol analysis error: {str(e)}")
 
     def _parse_trading_setup(self, setup: str) -> Dict[str, Any]:
-        try:
-            logging.debug(f"Parsing setup: {setup}")
-            
-            lines = setup.split('\n')
-            setup_dict = {}
-            
-            for line in lines:
-                if 'Entry:' in line:
-                    setup_dict['entry_price'] = float(line.split('$')[1].strip())
-                elif 'Target:' in line:
-                    setup_dict['target_price'] = float(line.split('$')[1].strip())
-                elif 'Stop:' in line:
-                    setup_dict['stop_price'] = float(line.split('$')[1].strip())
-                elif 'Size:' in line:
-                    setup_dict['size'] = int(line.split(':')[1].strip().split()[0])
-                elif 'Confidence:' in line:
-                    setup_dict['confidence'] = float(line.split(':')[1].strip().rstrip('%'))
-                elif 'Reason:' in line:
-                    setup_dict['reason'] = line.split(':')[1].strip()
-            
-            return setup_dict
-            
-        except Exception as e:
-            logging.error(f"Setup parsing error: {str(e)}")
-            return {}
+    try:
+        setup_dict = {}
+        lines = setup.strip().split('\n')
+        
+        for line in lines:
+            if ':' in line:
+                key, value = line.split(':', 1)
+                key = key.strip().lower()
+                value = value.strip()
+                
+                try:
+                    # Handle confidence with or without % sign
+                    if 'confidence' in key:
+                        # Remove % sign if present
+                        value = value.rstrip('%')
+                        setup_dict['confidence'] = float(value)
+                    
+                    # Handle currency values
+                    elif any(prefix in key for prefix in ['entry', 'target', 'stop']):
+                        # Remove $ sign and convert to float
+                        value = value.lstrip('$')
+                        setup_dict[key.replace(' ', '_')] = float(value)
+                    
+                    # Handle size and other numeric values
+                    elif key == 'size':
+                        setup_dict['size'] = int(value.split()[0])
+                    elif 'reason' in key:
+                        setup_dict['reason'] = value
+                    else:
+                        # Try converting to int, fallback to string
+                        try:
+                            setup_dict[key.replace(' ', '_')] = int(value)
+                        except ValueError:
+                            setup_dict[key.replace(' ', '_')] = value
+                
+                except ValueError as ve:
+                    logging.error(f"Error parsing {key}: {value} - {ve}")
+        
+        return setup_dict
+    
+    except Exception as e:
+        logging.error(f"Setup parsing error: {str(e)}")
+        return {}
 
     async def _execute_trade(self, symbol: str, setup: Dict[str, Any]):
         try:
