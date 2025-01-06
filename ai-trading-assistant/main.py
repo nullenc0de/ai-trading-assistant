@@ -5,6 +5,7 @@ from typing import Dict, Any
 from datetime import datetime
 import pandas as pd
 from enum import Enum, auto
+import json
 
 from components.config_manager import ConfigManager
 from components.stock_scanner import StockScanner
@@ -284,7 +285,11 @@ class TradingSystem:
                 await self._update_state(TradingState.OPPORTUNITY_DETECTION)
                 
                 tasks = [self.analyze_symbol(symbol) for symbol in symbols]
-                await asyncio.gather(*tasks)
+                
+                try:
+                    await asyncio.gather(*tasks)
+                except Exception as e:
+                    logging.error(f"Error during symbol analysis: {str(e)}")
                 
                 await self._update_state(TradingState.COOLDOWN)
                 
