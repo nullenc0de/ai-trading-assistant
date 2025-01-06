@@ -70,7 +70,7 @@ REASON: [explanation]"""
         try:
             prompt = f"""Analyze the following stock data and determine if there is a valid trading setup:
 
-{json.dumps(stock_data, indent=2)}
+{json.dumps(stock_data, indent=2, default=str)}
 
 Respond with a trading setup in the following format if a high-confidence setup is found:
 
