@@ -1,8 +1,9 @@
-import ollama
+import asyncio
 import logging
 from typing import Dict, Optional, Any
-import asyncio
 from datetime import datetime
+import pandas as pd
+import ollama
 
 class TradingAnalyst:
     def __init__(self, model="llama3:latest", max_retries=3):
@@ -10,54 +11,10 @@ class TradingAnalyst:
         self.max_retries = max_retries
         self.logger = logging.getLogger(__name__)
 
-    def _generate_technical_summary(self, data: Dict[str, Any]) -> str:
-        price = data.get('current_price', 0)
-        rsi = data.get('technical_indicators', {}).get('rsi', 'N/A')
-        vwap = data.get('technical_indicators', {}).get('vwap', 'N/A')
-        sma20 = data.get('technical_indicators', {}).get('sma20', 'N/A')
-        ema9 = data.get('technical_indicators', {}).get('ema9', 'N/A')
-        atr = data.get('technical_indicators', {}).get('atr', 'N/A')
-        
-        return f"""TECHNICAL INDICATORS:
-- Price: ${price:.2f}
-- RSI: {rsi if rsi != 'N/A' else 'Not Available'}
-- VWAP: ${vwap if vwap != 'N/A' else 'Not Available'}
-- SMA20: ${sma20 if sma20 != 'N/A' else 'Not Available'}
-- EMA9: ${ema9 if ema9 != 'N/A' else 'Not Available'}
-- ATR: {atr if atr != 'N/A' else 'Not Available'}"""
-
-    def generate_prompt(self, data: Dict[str, Any]) -> str:
-        return f"""You are a skilled stock trader. Analyze this data and provide a trading setup if valid.
-
-CURRENT STOCK DATA:
-Symbol: {data['symbol']}
-Price: ${data['current_price']:.2f}
-RSI: {data.get('technical_indicators', {}).get('rsi', 'N/A')}
-VWAP: ${data.get('technical_indicators', {}).get('vwap', 'N/A')}
-
-Respond with a trading setup EXACTLY like this example or 'NO SETUP':
-
-TRADING SETUP: {data['symbol']}
-Entry: $XX.XX
-Target: $XX.XX
-Stop: $XX.XX
-Size: X
-Reason: One clear reason for the trade
-Confidence: XX%
-Risk-Reward Ratio: X:1
-
-RULES:
-1. Entry must be within 2% of current price
-2. Risk-Reward ratio must be at least 2:1
-3. Size must be 100 shares for now
-4. Must include all fields exactly as shown
-
-Your response:"""
-
     async def analyze_position(self, stock_data: Dict[str, Any], position_data: Dict[str, Any]) -> Dict[str, Any]:
         try:
             entry_price = position_data['entry_price']
-            current_price = position_data['current_price']
+            current_price = stock_data['current_price']
             position_size = position_data['size']
             
             unrealized_pl = (current_price - entry_price) * position_size
@@ -88,90 +45,22 @@ Risk Multiple: {abs(unrealized_pl_pct) / abs(((entry_price - position_data['stop
 
 Choose one of these actions and provide a clear reason:
 
-1. HOLD - Keep the position unchanged
-
-2. EXIT - Close the entire position
-
-3. PARTIAL_EXIT - Advanced profit taking
-   Parameters needed:
-   - exit_percentage: Portion to exit (e.g., 0.5 for 50%)
-   - scale_points: Price levels for scaling out [price1, price2]
-   - sizes: Portion at each scale point [size1, size2]
-
-4. ADJUST_STOPS - Advanced stop management
-   Parameters needed:
-   - type: FIXED, TRAILING, or BREAKEVEN
-   - value: New stop price for FIXED, percentage for TRAILING, buffer for BREAKEVEN
+1. HOLD - Keep position unchanged
+2. EXIT - Close entire position
+3. PARTIAL_EXIT - Reduce position size
+4. ADJUST_STOPS - Modify stop loss
 
 Respond in this EXACT format:
-ACTION: [action type]
+ACTION: [HOLD/EXIT/PARTIAL_EXIT/ADJUST_STOPS]
 PARAMS: [parameters if needed]
-REASON: [Clear explanation incorporating multiple factors]
-
-Your analysis and decision:"""
+REASON: [Clear explanation]"""
 
             response = await self._generate_llm_response(prompt)
-            action_text = response.strip()
-            
-            try:
-                lines = action_text.split('\n')
-                action = {
-                    'action': lines[0].split(':')[1].strip(),
-                    'params': lines[1].split(':')[1].strip() if len(lines) > 1 and 'PARAMS:' in lines[1] else None,
-                    'reason': lines[-1].split(':')[1].strip()
-                }
-                return action
-                
-            except Exception as e:
-                self.logger.error(f"Error parsing position action: {str(e)}")
-                return None
+            return self._parse_position_action(response)
 
         except Exception as e:
             self.logger.error(f"Error analyzing position: {str(e)}")
-            return None
-
-    async def analyze_setup(self, data: Dict[str, Any]) -> Optional[str]:
-        symbol = data['symbol']
-
-        try:
-            required_fields = ['current_price', 'symbol']
-            if not all(data.get(field) for field in required_fields):
-                self.logger.warning(f"Missing required data fields for {symbol}")
-                return "NO SETUP"
-
-            prompt = self.generate_prompt(data)
-            self.logger.info(f"Sending prompt for {symbol}:\n{prompt}")
-            
-            for attempt in range(self.max_retries):
-                try:
-                    response = await self._generate_llm_response(prompt)
-                    setup = response.strip()
-                    
-                    self.logger.info(f"LLM Response for {symbol} (Attempt {attempt + 1}):\n{setup}")
-                    
-                    if not setup:
-                        continue
-                        
-                    if not setup.startswith('TRADING SETUP:') and setup != 'NO SETUP':
-                        if attempt == self.max_retries - 1:
-                            return "NO SETUP"
-                        continue
-                    
-                    if setup == 'NO SETUP' or self._validate_setup(setup, data):
-                        return setup
-                    
-                    if attempt == self.max_retries - 1:
-                        return "NO SETUP"
-                        
-                except Exception as e:
-                    self.logger.error(f"Attempt {attempt + 1} failed for {symbol}: {str(e)}")
-                    if attempt == self.max_retries - 1:
-                        return "NO SETUP"
-                    await asyncio.sleep(1)
-                    
-        except Exception as e:
-            self.logger.error(f"Error analyzing setup for {symbol}: {str(e)}")
-            return "NO SETUP"
+            return {'action': 'HOLD', 'params': None, 'reason': 'Error in analysis'}
 
     async def _generate_llm_response(self, prompt: str) -> str:
         try:
@@ -180,60 +69,136 @@ Your analysis and decision:"""
                 prompt=prompt,
                 options={
                     'temperature': 0.2,
-                    'num_predict': 150,
-                    'top_k': 10,
-                    'top_p': 0.5
+                    'num_predict': 150
                 }
             )
-            
             return response.get('response', '').strip()
-            
         except Exception as e:
-            self.logger.error(f"Error generating LLM response: {str(e)}")
+            self.logger.error(f"LLM error: {str(e)}")
             return ""
+
+    def _parse_position_action(self, response: str) -> Dict[str, Any]:
+        try:
+            lines = response.split('\n')
+            action = {
+                'action': lines[0].split(':')[1].strip(),
+                'params': lines[1].split(':')[1].strip() if len(lines) > 1 and 'PARAMS:' in lines[1] else None,
+                'reason': lines[-1].split(':')[1].strip()
+            }
+            return action
+        except Exception as e:
+            self.logger.error(f"Error parsing action: {str(e)}")
+            return {'action': 'HOLD', 'params': None, 'reason': 'Parse error'}
+
+    async def analyze_setup(self, data: Dict[str, Any]) -> Optional[str]:
+        try:
+            if not self._validate_data(data):
+                return "NO SETUP"
+
+            prompt = self._generate_setup_prompt(data)
+            setup = await self._generate_llm_response(prompt)
+
+            if self._validate_setup(setup, data):
+                return setup
+            return "NO SETUP"
+
+        except Exception as e:
+            self.logger.error(f"Setup analysis error: {str(e)}")
+            return "NO SETUP"
+
+    def _validate_data(self, data: Dict[str, Any]) -> bool:
+        required = ['symbol', 'current_price']
+        return all(data.get(field) for field in required)
+
+    def _generate_setup_prompt(self, data: Dict[str, Any]) -> str:
+        return f"""Analyze this stock data and provide a trading setup if valid.
+
+STOCK DATA:
+Symbol: {data['symbol']}
+Price: ${data['current_price']:.2f}
+RSI: {data.get('technical_indicators', {}).get('rsi', 'N/A')}
+VWAP: ${data.get('technical_indicators', {}).get('vwap', 'N/A')}
+
+Respond with setup in this format or 'NO SETUP':
+TRADING SETUP: {data['symbol']}
+Entry: $XX.XX
+Target: $XX.XX
+Stop: $XX.XX
+Size: 100
+Reason: Clear reason
+Confidence: XX%
+Risk-Reward: X:1"""
 
     def _validate_setup(self, setup: str, data: Dict[str, Any]) -> bool:
         try:
-            if setup == 'NO SETUP':
+            if setup == "NO SETUP":
                 return True
-            
-            self.logger.debug(f"Validating setup: {setup}")
-            
+
             lines = setup.split('\n')
             if len(lines) < 7:
-                self.logger.warning("Setup has insufficient lines")
                 return False
-            
-            try:
-                for line in lines:
-                    if 'Entry:' in line:
-                        entry_price = float(line.split('$')[1].strip())
-                    elif 'Target:' in line:
-                        target_price = float(line.split('$')[1].strip())
-                    elif 'Stop:' in line:
-                        stop_price = float(line.split('$')[1].strip())
-            except (IndexError, ValueError) as e:
-                self.logger.warning(f"Error parsing price values: {e}")
-                return False
+
+            entry = float(lines[1].split('$')[1])
+            target = float(lines[2].split('$')[1])
+            stop = float(lines[3].split('$')[1])
             
             current_price = data['current_price']
-            if not (0.8 * current_price <= entry_price <= 1.2 * current_price):
-                self.logger.warning(f"Entry price {entry_price} too far from current price {current_price}")
+            if not (0.98 * current_price <= entry <= 1.02 * current_price):
                 return False
-            
-            risk = abs(entry_price - stop_price)
-            reward = abs(target_price - entry_price)
+
+            risk = abs(entry - stop)
             if risk == 0:
-                self.logger.warning("Zero risk (entry price equals stop price)")
                 return False
-                
-            risk_reward = reward / risk
-            if risk_reward < 2:
-                self.logger.warning(f"Risk/reward ratio {risk_reward} below minimum")
+
+            reward = abs(target - entry)
+            if reward / risk < 2:
                 return False
-            
+
             return True
-            
+
         except Exception as e:
-            self.logger.error(f"Error validating setup: {str(e)}")
+            self.logger.error(f"Setup validation error: {str(e)}")
             return False
+
+    async def handle_position_action(self, symbol: str, action: Dict[str, Any], position: pd.Series, current_data: Dict[str, Any]):
+        try:
+            action_type = action['action'].upper()
+            
+            if action_type == 'HOLD':
+                return
+
+            elif action_type == 'EXIT':
+                exit_data = {
+                    'status': 'CLOSED',
+                    'exit_price': current_data['current_price'],
+                    'exit_time': datetime.now().isoformat(),
+                    'profit_loss': (current_data['current_price'] - position['entry_price']) * position['position_size']
+                }
+                return exit_data
+
+            elif action_type == 'PARTIAL_EXIT':
+                current_size = position['position_size']
+                exit_size = current_size // 2
+                remaining = current_size - exit_size
+                exit_pl = (current_data['current_price'] - position['entry_price']) * exit_size
+                
+                update_data = {
+                    'position_size': remaining,
+                    'partial_exit_price': current_data['current_price'],
+                    'partial_exit_time': datetime.now().isoformat(),
+                    'partial_exit_pl': exit_pl
+                }
+                return update_data
+
+            elif action_type == 'ADJUST_STOPS':
+                stop_type = action.get('params', {}).get('type', 'FIXED')
+                value = action.get('params', {}).get('value', position['stop_price'])
+                
+                return {
+                    'stop_price': value,
+                    'stop_type': stop_type
+                }
+
+        except Exception as e:
+            self.logger.error(f"Position action error: {str(e)}")
+            return None
