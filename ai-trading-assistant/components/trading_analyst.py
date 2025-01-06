@@ -43,7 +43,8 @@ class TradingAnalyst:
                         position_size = float(matches[0]) if matches else 100
                     else:
                         position_size = float(re.findall(r'[\d.]+', position_size)[0])
-                except:
+                except ValueError:
+                    self.logger.warning(f"Invalid position size: {position_size}. Defaulting to 100.")
                     position_size = 100
             
             # Ensure position_size is a numeric value
@@ -95,7 +96,7 @@ REASON: [explanation]"""
 
         except Exception as e:
             self.logger.error(f"Position analysis error: {str(e)}")
-            return {'action': 'HOLD', 'reason': 'Analysis error'}
+            return {'action': 'HOLD','reason': 'Analysis error'}
 
     async def analyze_setup(self, stock_data: Dict[str, Any]) -> str:
         """
@@ -159,19 +160,39 @@ Important: Do not include '%' with Confidence. Use a numeric value only.
         """
         try:
             lines = response.split('\n')
-            if len(lines) < 1:
+            if not lines:
                 self.logger.error("Unexpected response format: response is empty")
-                return {'action': 'HOLD', 'reason': 'Parse error'}
+                return {'action': 'HOLD','reason': 'Parse error: Empty response'}
 
-            action = {
-                'action': lines[0].split(':')[1].strip() if len(lines[0].split(':')) > 1 else 'HOLD',
-                'params': lines[1].split(':')[1].strip() if len(lines) > 1 and 'PARAMS:' in lines[1] else None, 
-                'reason': lines[-1].split(':')[1].strip() if len(lines) > 2 else 'Parse error'
-            }
-            return action
-        except Exception as e:
-            self.logger.error(f"Action parse error: {str(e)}")
-            return {'action': 'HOLD', 'reason': 'Parse error'}
+            action_line = lines[0].split(':')
+            if len(action_line) < 2:
+                self.logger.error(f"Invalid action line: {lines[0]}")
+                return {'action': 'HOLD','reason': 'Parse error: Invalid action line'}
+
+            action_type = action_line[1].strip()
+
+            params_line = None
+            if len(lines) > 1 and 'PARAMS:' in lines[1]:
+                params_line = lines[1].split(':')
+                if len(params_line) < 2:
+                    self.logger.error(f"Invalid params line: {lines[1]}")
+                else:
+                    params = params_line[1].strip()
+
+            reason_line = lines[-1].split(':')
+            if len(reason_line) < 2:
+                self.logger.error(f"Invalid reason line: {lines[-1]}")
+            else:
+                reason = reason_line[1].strip()
+
+            return {'action': action_type, 'params': params,'reason': reason}
+
+        except IndexError as e:
+            self.logger.error(f"IndexError during parsing: {str(e)}")
+            return {'action': 'HOLD','reason': 'Parse error: IndexError'}
+        except ValueError as e:
+            self.logger.error(f"ValueError during parsing: {str(e)}")
+            return {'action': 'HOLD','reason': 'Parse error: ValueError'}
 
     def _parse_setup(self, response: str) -> Dict[str, Any]:
         """
@@ -195,7 +216,7 @@ Important: Do not include '%' with Confidence. Use a numeric value only.
                     
                     # Handle percentage parsing
                     if 'confidence' in key:
-                        # Remove % sign and convert to float
+# Remove % sign and convert to float
                         value = value.rstrip('%')
                         try:
                             setup['confidence'] = float(value)
@@ -203,7 +224,7 @@ Important: Do not include '%' with Confidence. Use a numeric value only.
                             self.logger.warning(f"Invalid confidence value: {value}")
                     
                     # Handle currency values
-                    elif any(prefix in key for prefix in ['entry', 'target', 'stop']):
+                    elif any(prefix in key for prefix in ['entry', 'target','stop']):
                         # Remove $ sign and convert to float
                         value = value.lstrip('$')
                         try:
@@ -212,7 +233,7 @@ Important: Do not include '%' with Confidence. Use a numeric value only.
                             self.logger.warning(f"Invalid price value for {key}: {value}")
                     
                     # Handle size with percentage support
-                    elif 'size' in key:
+                    elif'size' in key:
                         try:
                             # Handle percentage or fixed size
                             if '%' in value.lower():
@@ -221,15 +242,19 @@ Important: Do not include '%' with Confidence. Use a numeric value only.
                             else:
                                 # Try to extract numeric value
                                 setup['size'] = float(re.findall(r'[\d.]+', value)[0])
-                        except:
-                            setup['size'] = value
+                        except ValueError:
+                            self.logger.warning(f"Invalid size value: {value}")
+                            setup['size'] = value  # Keep the original value even if invalid
                     
                     # Handle risk/reward
                     elif 'risk/reward' in key:
-                        setup['risk_reward'] = value
+                        try:
+                            setup['risk_reward'] = float(value)
+                        except ValueError:
+                            self.logger.warning(f"Invalid risk/reward value: {value}")
                     
                     # Handle reason or other text fields
-                    elif 'reason' in key:
+                    elif'reason' in key:
                         setup['reason'] = value
                     
                     # Fallback for other numeric or text values
