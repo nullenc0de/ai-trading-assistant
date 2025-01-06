@@ -174,6 +174,90 @@ class TradingSystem:
         except Exception as e:
             logging.error(f"Symbol analysis error: {str(e)}")
 
+    def _parse_trading_setup(self, setup: str) -> Dict[str, Any]:
+        try:
+            setup_dict = {}
+            lines = setup.strip().split('\n')
+            
+            for line in lines:
+                if ':' in line:
+                    key, value = line.split(':', 1)
+                    key = key.strip().lower()
+                    value = value.strip()
+                    
+                    try:
+                        # Symbol
+                        if 'symbol' in key:
+                            setup_dict['symbol'] = value
+                        
+                        # Numeric values with robust parsing
+                        elif any(prefix in key for prefix in ['entry', 'target', 'stop']):
+                            value = value.lstrip('$')
+                            try:
+                                numeric_value = float(value)
+                                setup_dict[key.replace(' ', '_')] = numeric_value
+                            except ValueError:
+                                logging.warning(f"Could not parse {key}: {value}")
+                        
+                        # Confidence
+                        elif 'confidence' in key:
+                            value = value.rstrip('%')
+                            try:
+                                setup_dict['confidence'] = float(value)
+                            except ValueError:
+                                logging.warning(f"Invalid confidence: {value}")
+                        
+                        # Size handling
+                        elif 'size' in key:
+                            try:
+                                if '%' in value.lower():
+                                    matches = re.findall(r'([\d.]+)\s*%', value)
+                                    if matches:
+                                        setup_dict['size'] = float(matches[0])
+                                else:
+                                    setup_dict['size'] = float(re.findall(r'[\d.]+', value)[0])
+                            except:
+                                setup_dict['size'] = value
+                        
+                        # Risk/Reward
+                        elif 'risk/reward' in key:
+                            setup_dict['risk_reward'] = value
+                        
+                        # Reason
+                        elif 'reason' in key:
+                            setup_dict['reason'] = value
+                    
+                    except Exception as ve:
+                        logging.error(f"Error parsing {key}: {value} - {ve}")
+            
+            return setup_dict
+        
+        except Exception as e:
+            logging.error(f"Setup parsing error: {str(e)}")
+            return {}
+
+    async def _execute_trade(self, symbol: str, setup: Dict[str, Any]):
+        try:
+            min_confidence = self.config_manager.get('trading_rules.min_setup_confidence', 75)
+            if setup.get('confidence', 0) <= min_confidence:
+                logging.info(f"Setup confidence {setup.get('confidence')}% below threshold")
+                return
+                
+            self.active_trades[symbol] = {
+                'entry_price': setup.get('entry', setup.get('entry_price')),
+                'target_price': setup.get('target', setup.get('target_price')),
+                'stop_price': setup.get('stop', setup.get('stop_price')),
+                'size': setup.get('size', 100),
+                'entry_time': datetime.now()
+            }
+            
+            logging.info(f"Paper trade executed for {symbol}:")
+            for key, value in setup.items():
+                logging.info(f"- {key}: {value}")
+            
+        except Exception as e:
+            logging.error(f"Trade execution error: {str(e)}")
+
     async def _analyze_premarket_movers(self, symbols: List[str]):
         """Analyze pre-market movers and prepare watchlist"""
         try:
@@ -318,3 +402,46 @@ class TradingSystem:
             except Exception as e:
                 logging.error(f"Main loop error: {str(e)}")
                 await asyncio.sleep(60)
+
+    async def _update_state(self, new_state: TradingState):
+        old_state = self.current_state
+        self.current_state = new_state
+        logging.info(f"State transition: {old_state.name} -> {new_state.name}")
+
+def main():
+    try:
+        # Setup logging before anything else
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.StreamHandler(),
+                logging.FileHandler('trading_system.log')
+            ]
+        )
+        
+        logging.info("Starting trading system...")
+        
+        # Create and run the trading system
+        trading_system = TradingSystem()
+        
+        # Run the async event loop
+        loop = asyncio.get_event_loop()
+        try:
+            loop.run_until_complete(trading_system.run())
+        except KeyboardInterrupt:
+            logging.info("Shutting down trading system...")
+        finally:
+            loop.close()
+            
+    except KeyboardInterrupt:
+        print("\nTrading system stopped by user.")
+        logging.info("User initiated shutdown")
+    except Exception as e:
+        logging.critical(f"Fatal error: {str(e)}")
+        raise
+    finally:
+        logging.info("Trading system shutdown complete")
+
+if __name__ == "__main__":
+    main()
