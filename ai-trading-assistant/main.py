@@ -345,13 +345,16 @@ class TradingSystem:
                 market_status = self.market_monitor.get_market_status()
                 
                 if market_phase == 'closed':
+                    current_time = datetime.now(self.market_monitor.timezone).strftime('%H:%M:%S %Z')
                     time_until_open = self.market_monitor.time_until_market_open()
+                    
                     if market_status['is_weekend']:
-                        logging.info("Market closed for weekend.")
+                        logging.info(f"Market closed for weekend. Current time: {current_time}")
                     elif market_status['today_is_holiday']:
-                        logging.info("Market closed for holiday.")
+                        logging.info(f"Market closed for holiday. Current time: {current_time}")
                     else:
-                        logging.info(f"Market closed. Next session begins in {time_until_open.total_seconds() / 3600:.1f} hours")
+                        hours_until = time_until_open.total_seconds() / 3600
+                        logging.info(f"Market closed. Current time: {current_time}. Next session begins in {hours_until:.1f} hours")
                     await asyncio.sleep(300)  # Check every 5 minutes
                     continue
                     
