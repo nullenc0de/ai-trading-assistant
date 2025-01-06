@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import re
 from typing import Dict, Any
 from datetime import datetime
 import pandas as pd
@@ -171,10 +172,10 @@ class TradingSystem:
                     print(formatted_setup)
                     
                     trade_data = {
-                        'symbol': symbol,
-                        'entry_price': setup_details.get('entry_price'),
-                        'target_price': setup_details.get('target_price'),
-                        'stop_price': setup_details.get('stop_price'),
+                        'symbol': setup_details.get('symbol', symbol),
+                        'entry_price': setup_details.get('entry', setup_details.get('entry_price')),
+                        'target_price': setup_details.get('target', setup_details.get('target_price')),
+                        'stop_price': setup_details.get('stop', setup_details.get('stop_price')),
                         'size': setup_details.get('size', 100),
                         'confidence': setup_details.get('confidence'),
                         'reason': setup_details.get('reason', ''),
@@ -202,27 +203,50 @@ class TradingSystem:
                     value = value.strip()
                     
                     try:
-                        # Handle confidence with % sign
-                        if 'confidence' in key:
-                            # Remove % sign and convert to float
-                            value = value.rstrip('%')
-                            setup_dict['confidence'] = float(value)
+                        # Symbol
+                        if 'symbol' in key:
+                            setup_dict['symbol'] = value
                         
-                        # Handle currency values
+                        # Numeric values with robust parsing
                         elif any(prefix in key for prefix in ['entry', 'target', 'stop']):
-                            # Remove $ sign
                             value = value.lstrip('$')
-                            setup_dict[key.replace(' ', '_')] = float(value)
-                        
-                        # Handle other numeric values
-                        else:
-                            # Try converting to int, fallback to string
                             try:
-                                setup_dict[key.replace(' ', '_')] = int(value)
+                                numeric_value = float(value)
+                                setup_dict[key.replace(' ', '_')] = numeric_value
                             except ValueError:
-                                setup_dict[key.replace(' ', '_')] = value
+                                logging.warning(f"Could not parse {key}: {value}")
+                        
+                        # Confidence
+                        elif 'confidence' in key:
+                            value = value.rstrip('%')
+                            try:
+                                setup_dict['confidence'] = float(value)
+                            except ValueError:
+                                logging.warning(f"Invalid confidence: {value}")
+                        
+                        # Size handling
+                        elif 'size' in key:
+                            # Extract numeric value if possible
+                            try:
+                                # Try to find numeric part, handle percentage or fixed size
+                                if '%' in value.lower():
+                                    matches = re.findall(r'([\d.]+)\s*%', value)
+                                    if matches:
+                                        setup_dict['size'] = float(matches[0])
+                                else:
+                                    setup_dict['size'] = float(re.findall(r'[\d.]+', value)[0])
+                            except:
+                                setup_dict['size'] = value
+                        
+                        # Risk/Reward
+                        elif 'risk/reward' in key:
+                            setup_dict['risk_reward'] = value
+                        
+                        # Reason
+                        elif 'reason' in key:
+                            setup_dict['reason'] = value
                     
-                    except ValueError as ve:
+                    except Exception as ve:
                         logging.error(f"Error parsing {key}: {value} - {ve}")
             
             return setup_dict
@@ -239,9 +263,9 @@ class TradingSystem:
                 return
                 
             self.active_trades[symbol] = {
-                'entry_price': setup.get('entry_price'),
-                'target_price': setup.get('target_price'),
-                'stop_price': setup.get('stop_price'),
+                'entry_price': setup.get('entry', setup.get('entry_price')),
+                'target_price': setup.get('target', setup.get('target_price')),
+                'stop_price': setup.get('stop', setup.get('stop_price')),
                 'size': setup.get('size', 100),
                 'entry_time': datetime.now()
             }
