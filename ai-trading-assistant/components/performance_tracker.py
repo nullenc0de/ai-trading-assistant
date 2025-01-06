@@ -1,4 +1,3 @@
-# components/performance_tracker.py
 import os
 import json
 import pandas as pd
@@ -9,7 +8,7 @@ from typing import Dict, Optional, Any, List
 
 class PerformanceTracker:
     def __init__(self, log_dir='performance_logs'):
-        """Initialize Performance Tracker with paper trading support"""
+        """Initialize Performance Tracker with enhanced logging"""
         self.log_dir = log_dir
         self.trades_file = os.path.join(log_dir, 'trades.csv')
         self.metrics_file = os.path.join(log_dir, 'metrics.json')
@@ -61,7 +60,7 @@ class PerformanceTracker:
             raise
 
     def log_trade(self, trade_data: Dict[str, Any]) -> bool:
-        """Log paper trade with enhanced validation"""
+        """Log new trade with validation"""
         try:
             # Validate trade data
             required_fields = ['symbol', 'entry_price']
@@ -73,9 +72,9 @@ class PerformanceTracker:
                 trade_data['timestamp'] = datetime.now().isoformat()
                 
             # For paper trading, mark trade as simulated
-            trade_data['simulated'] = True
-            trade_data['type'] = 'PAPER'
-            trade_data['status'] = 'OPEN'
+            trade_data['simulated'] = trade_data.get('simulated', True)
+            trade_data['type'] = trade_data.get('type', 'PAPER')
+            trade_data['status'] = trade_data.get('status', 'OPEN')
             
             # Create trade row
             trade_row = {
@@ -102,9 +101,10 @@ class PerformanceTracker:
             df = pd.concat([df, pd.DataFrame([trade_row])], ignore_index=True)
             df.to_csv(self.trades_file, index=False)
             
-            self.logger.info(f"Paper trade logged for {trade_data['symbol']}")
-            self.logger.debug(f"Trade details: {trade_row}")
+            # Update metrics
+            self._update_metrics()
             
+            self.logger.info(f"Trade logged for {trade_data['symbol']}")
             return True
             
         except Exception as e:
@@ -136,7 +136,7 @@ class PerformanceTracker:
                 position_size = df.at[trade_idx, 'position_size']
                 
                 profit_loss = (exit_price - entry_price) * position_size
-                profit_loss_percent = (exit_price / entry_price - 1) * 100
+                profit_loss_percent = ((exit_price / entry_price) - 1) * 100
                 
                 df.at[trade_idx, 'profit_loss'] = profit_loss
                 df.at[trade_idx, 'profit_loss_percent'] = profit_loss_percent
@@ -145,7 +145,7 @@ class PerformanceTracker:
             # Save updates
             df.to_csv(self.trades_file, index=False)
             
-            # Update metrics
+            # Update metrics immediately
             self._update_metrics()
             
             return True
@@ -161,55 +161,100 @@ class PerformanceTracker:
             closed_trades = df[df['status'] == 'CLOSED'].copy()
             
             if len(closed_trades) == 0:
-                return
-            
-            # Calculate metrics
-            metrics = {
-                'total_trades': len(closed_trades),
-                'winning_trades': len(closed_trades[closed_trades['profit_loss'] > 0]),
-                'losing_trades': len(closed_trades[closed_trades['profit_loss'] < 0]),
-            }
-            
-            # Win rate
-            metrics['win_rate'] = (
-                metrics['winning_trades'] / metrics['total_trades'] * 100 
-                if metrics['total_trades'] > 0 else 0
-            )
-            
-            # Profit metrics
-            winners = closed_trades[closed_trades['profit_loss'] > 0]
-            losers = closed_trades[closed_trades['profit_loss'] < 0]
-            
-            metrics.update({
-                'average_win': winners['profit_loss'].mean() if len(winners) > 0 else 0,
-                'average_loss': losers['profit_loss'].mean() if len(losers) > 0 else 0,
-                'largest_win': winners['profit_loss'].max() if len(winners) > 0 else 0,
-                'largest_loss': losers['profit_loss'].min() if len(losers) > 0 else 0,
-                'avg_profit_loss': closed_trades['profit_loss'].mean(),
-            })
-            
-            # Calculate drawdown
-            equity_curve = (1 + closed_trades['profit_loss_percent'] / 100).cumprod()
-            rolling_max = equity_curve.expanding().max()
-            drawdowns = (equity_curve - rolling_max) / rolling_max * 100
-            metrics['max_drawdown'] = abs(drawdowns.min())
-            
-            # Calculate profit factor
-            total_profit = winners['profit_loss'].sum() if len(winners) > 0 else 0
-            total_loss = abs(losers['profit_loss'].sum()) if len(losers) > 0 else 0
-            metrics['profit_factor'] = (
-                total_profit / total_loss if total_loss > 0 else float('inf')
-            )
-            
-            # Add timestamp
-            metrics['last_updated'] = datetime.now().isoformat()
-            
+                metrics = {
+                    'total_trades': len(df),
+                    'winning_trades': 0,
+                    'losing_trades': 0,
+                    'win_rate': 0.0,
+                    'avg_profit_loss': 0.0,
+                    'max_drawdown': 0.0,
+                    'profit_factor': 0.0,
+                    'largest_win': 0.0,
+                    'largest_loss': 0.0,
+                    'average_win': 0.0,
+                    'average_loss': 0.0,
+                    'last_updated': datetime.now().isoformat()
+                }
+            else:
+                # Calculate metrics for closed trades
+                winners = closed_trades[closed_trades['profit_loss'] > 0]
+                losers = closed_trades[closed_trades['profit_loss'] < 0]
+                
+                metrics = {
+                    'total_trades': len(df),
+                    'winning_trades': len(winners),
+                    'losing_trades': len(losers),
+                    'win_rate': (len(winners) / len(closed_trades) * 100) if len(closed_trades) > 0 else 0.0,
+                    'avg_profit_loss': closed_trades['profit_loss'].mean() if not closed_trades.empty else 0.0,
+                    'largest_win': winners['profit_loss'].max() if not winners.empty else 0.0,
+                    'largest_loss': losers['profit_loss'].min() if not losers.empty else 0.0,
+                    'average_win': winners['profit_loss'].mean() if not winners.empty else 0.0,
+                    'average_loss': losers['profit_loss'].mean() if not losers.empty else 0.0,
+                }
+                
+                # Calculate drawdown
+                equity_curve = (1 + closed_trades['profit_loss_percent'] / 100).cumprod()
+                rolling_max = equity_curve.expanding().max()
+                drawdowns = (equity_curve - rolling_max) / rolling_max * 100
+                metrics['max_drawdown'] = abs(drawdowns.min()) if not drawdowns.empty else 0.0
+                
+                # Calculate profit factor
+                total_profit = winners['profit_loss'].sum() if not winners.empty else 0
+                total_loss = abs(losers['profit_loss'].sum()) if not losers.empty else 0
+                metrics['profit_factor'] = (
+                    total_profit / total_loss if total_loss > 0 else 
+                    float('inf') if total_profit > 0 else 0.0
+                )
+                
+                metrics['last_updated'] = datetime.now().isoformat()
+
             # Save metrics
             with open(self.metrics_file, 'w') as f:
                 json.dump(metrics, f, indent=2)
                 
         except Exception as e:
             self.logger.error(f"Error updating metrics: {str(e)}")
+
+    def get_metrics(self) -> Dict[str, Any]:
+        """Get current performance metrics"""
+        try:
+            # Force update metrics before returning
+            self._update_metrics()
+            
+            with open(self.metrics_file, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            self.logger.error(f"Error getting metrics: {str(e)}")
+            return {}
+
+    def get_trade_history(self, symbol: Optional[str] = None, days: Optional[int] = None) -> pd.DataFrame:
+        """Get trade history with optional filtering"""
+        try:
+            df = pd.read_csv(self.trades_file)
+            
+            # Apply filters
+            if symbol:
+                df = df[df['symbol'] == symbol]
+            
+            if days:
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                cutoff = datetime.now() - timedelta(days=days)
+                df = df[df['timestamp'] >= cutoff]
+            
+            return df
+            
+        except Exception as e:
+            self.logger.error(f"Error getting trade history: {str(e)}")
+            return pd.DataFrame()
+
+    def get_open_positions(self) -> pd.DataFrame:
+        """Get currently open positions"""
+        try:
+            df = pd.read_csv(self.trades_file)
+            return df[df['status'] == 'OPEN'].copy()
+        except Exception as e:
+            self.logger.error(f"Error getting open positions: {str(e)}")
+            return pd.DataFrame()
 
     def generate_report(self, days: Optional[int] = None) -> str:
         """Generate comprehensive trading performance report"""
@@ -223,8 +268,7 @@ class PerformanceTracker:
                 df = df[df['timestamp'] >= cutoff]
             
             # Load metrics
-            with open(self.metrics_file, 'r') as f:
-                metrics = json.load(f)
+            metrics = self.get_metrics()
             
             # Generate report sections
             sections = []
@@ -266,44 +310,6 @@ class PerformanceTracker:
             self.logger.error(f"Error generating report: {str(e)}")
             return "Unable to generate performance report"
 
-    def get_metrics(self) -> Dict[str, Any]:
-        """Get current performance metrics"""
-        try:
-            with open(self.metrics_file, 'r') as f:
-                return json.load(f)
-        except Exception as e:
-            self.logger.error(f"Error getting metrics: {str(e)}")
-            return {}
-
-    def get_open_positions(self) -> pd.DataFrame:
-        """Get currently open positions"""
-        try:
-            df = pd.read_csv(self.trades_file)
-            return df[df['status'] == 'OPEN'].copy()
-        except Exception as e:
-            self.logger.error(f"Error getting open positions: {str(e)}")
-            return pd.DataFrame()
-
-    def get_trade_history(self, symbol: Optional[str] = None, days: Optional[int] = None) -> pd.DataFrame:
-        """Get trade history with optional filtering"""
-        try:
-            df = pd.read_csv(self.trades_file)
-            
-            # Apply filters
-            if symbol:
-                df = df[df['symbol'] == symbol]
-            
-            if days:
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
-                cutoff = datetime.now() - timedelta(days=days)
-                df = df[df['timestamp'] >= cutoff]
-            
-            return df
-            
-        except Exception as e:
-            self.logger.error(f"Error getting trade history: {str(e)}")
-            return pd.DataFrame()
-
     def export_data(self, format: str = 'csv') -> Optional[str]:
         """Export trading data to specified format"""
         try:
@@ -331,4 +337,145 @@ class PerformanceTracker:
         except Exception as e:
             self.logger.error(f"Error exporting data: {str(e)}")
             return None
-            total
+
+    def reset_statistics(self) -> bool:
+        """Reset performance statistics"""
+        try:
+            initial_metrics = {
+                'total_trades': 0,
+                'winning_trades': 0,
+                'losing_trades': 0,
+                'win_rate': 0.0,
+                'avg_profit_loss': 0.0,
+                'max_drawdown': 0.0,
+                'profit_factor': 0.0,
+                'largest_win': 0.0,
+                'largest_loss': 0.0,
+                'average_win': 0.0,
+                'average_loss': 0.0,
+                'last_updated': datetime.now().isoformat()
+            }
+            
+            with open(self.metrics_file, 'w') as f:
+                json.dump(initial_metrics, f, indent=2)
+            
+            # Clear trades file
+            columns = [
+                'timestamp', 'symbol', 'entry_price', 'exit_price',
+                'target_price', 'stop_price', 'position_size',
+                'confidence', 'type', 'simulated', 'status',
+                'profit_loss', 'profit_loss_percent', 'exit_time',
+                'reason', 'notes'
+            ]
+            pd.DataFrame(columns=columns).to_csv(self.trades_file, index=False)
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error resetting statistics: {str(e)}")
+            return False
+
+    def calculate_daily_stats(self, date: Optional[datetime] = None) -> Dict[str, Any]:
+        """Calculate daily trading statistics"""
+        try:
+            df = pd.read_csv(self.trades_file)
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            
+            # Filter for specific date
+            if date is None:
+                date = datetime.now()
+            
+            daily_trades = df[df['timestamp'].dt.date == date.date()]
+            
+            if daily_trades.empty:
+                return {
+                    'date': date.strftime('%Y-%m-%d'),
+                    'total_trades': 0,
+                    'profit_loss': 0.0,
+                    'win_rate': 0.0,
+                    'active_positions': 0
+                }
+            
+            closed_trades = daily_trades[daily_trades['status'] == 'CLOSED']
+            winners = closed_trades[closed_trades['profit_loss'] > 0]
+            
+            stats = {
+                'date': date.strftime('%Y-%m-%d'),
+                'total_trades': len(daily_trades),
+                'profit_loss': closed_trades['profit_loss'].sum() if not closed_trades.empty else 0.0,
+                'win_rate': (len(winners) / len(closed_trades) * 100) if not closed_trades.empty else 0.0,
+                'active_positions': len(daily_trades[daily_trades['status'] == 'OPEN'])
+            }
+            
+            return stats
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating daily stats: {str(e)}")
+            return {}
+
+    def validate_trade_data(self, trade_data: Dict[str, Any]) -> bool:
+        """Validate trade data structure and values"""
+        try:
+            # Required fields
+            required = ['symbol', 'entry_price', 'target_price', 'stop_price']
+            if not all(field in trade_data for field in required):
+                return False
+                
+            # Numeric validation
+            numeric_fields = ['entry_price', 'target_price', 'stop_price', 'position_size']
+            for field in numeric_fields:
+                if field in trade_data:
+                    value = trade_data[field]
+                    if not isinstance(value, (int, float)) or value <= 0:
+                        return False
+            
+            # Logic validation
+            if trade_data['stop_price'] >= trade_data['entry_price']:
+                return False
+            if trade_data['target_price'] <= trade_data['entry_price']:
+                return False
+                
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error validating trade data: {str(e)}")
+            return False
+
+    def analyze_performance_by_setup(self) -> Dict[str, Any]:
+        """Analyze performance metrics grouped by setup type"""
+        try:
+            df = pd.read_csv(self.trades_file)
+            closed_trades = df[df['status'] == 'CLOSED'].copy()
+            
+            if closed_trades.empty:
+                return {}
+            
+            # Group by reason/setup type
+            grouped = closed_trades.groupby('reason').agg({
+                'profit_loss': ['count', 'mean', 'sum'],
+                'profit_loss_percent': 'mean'
+            }).round(2)
+            
+            # Calculate win rate per setup
+            def calculate_win_rate(group):
+                winners = len(group[group['profit_loss'] > 0])
+                return (winners / len(group) * 100) if len(group) > 0 else 0
+                
+            win_rates = closed_trades.groupby('reason').apply(calculate_win_rate)
+            
+            # Format results
+            results = {}
+            for setup in grouped.index:
+                results[setup] = {
+                    'total_trades': int(grouped.loc[setup, ('profit_loss', 'count')]),
+                    'avg_profit_loss': float(grouped.loc[setup, ('profit_loss', 'mean')]),
+                    'total_profit_loss': float(grouped.loc[setup, ('profit_loss', 'sum')]),
+                    'avg_profit_loss_percent': float(grouped.loc[setup, ('profit_loss_percent', 'mean')]),
+                    'win_rate': float(win_rates[setup])
+                }
+            
+            return results
+            
+        except Exception as e:
+            self.logger.error(f"Error analyzing performance by setup: {str(e)}")
+            return {}
