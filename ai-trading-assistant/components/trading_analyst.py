@@ -115,4 +115,99 @@ Target: $[price target]
 Stop: $[stop loss]
 Size: [position size]
 Confidence: [numeric confidence percentage]
-Risk/Reward:
+Risk/Reward: [risk/reward ratio]
+Reason: [detailed explanation]
+
+If no valid setup is found, respond only with: NO SETUP FOUND"""
+
+            response = await self._generate_llm_response(prompt)
+            self.logger.info(f"LLM Response for setup analysis ({stock_data['symbol']}):\n{response}")
+            
+            # Validate the response format
+            if "NO SETUP FOUND" in response:
+                return response
+                
+            # Verify that all required fields are present
+            required_fields = ['Symbol:', 'Entry:', 'Target:', 'Stop:', 'Confidence:']
+            if not all(field in response for field in required_fields):
+                self.logger.warning(f"Invalid setup format for {stock_data['symbol']}")
+                return "NO SETUP FOUND"
+            
+            return response
+    
+        except Exception as e:
+            self.logger.error(f"Setup analysis error: {str(e)}")
+            return "NO SETUP FOUND"
+
+    def _parse_position_action(self, response: str) -> Dict[str, Any]:
+        """Parse LLM response for position action"""
+        try:
+            action_dict = {
+                'action': 'HOLD',
+                'params': None,
+                'reason': 'Default hold due to parsing error'
+            }
+            
+            lines = [line.strip() for line in response.split('\n') if line.strip()]
+            
+            for line in lines:
+                if ':' not in line:
+                    continue
+                    
+                key, value = [part.strip() for part in line.split(':', 1)]
+                key = key.upper()
+                
+                if key == 'ACTION':
+                    value = value.upper()
+                    if value in ['HOLD', 'EXIT', 'PARTIAL_EXIT', 'ADJUST_STOPS']:
+                        action_dict['action'] = value
+                elif key == 'PARAMS':
+                    # Validate stop adjustment parameters
+                    if action_dict['action'] == 'ADJUST_STOPS':
+                        try:
+                            if '=' in value:
+                                stop_value = float(value.split('=')[1].strip())
+                            else:
+                                stop_value = float(value.strip())
+                            action_dict['params'] = str(stop_value)
+                        except ValueError:
+                            self.logger.error(f"Invalid stop price parameter: {value}")
+                            action_dict['action'] = 'HOLD'
+                    else:
+                        action_dict['params'] = value
+                elif key == 'REASON':
+                    action_dict['reason'] = value
+
+            return action_dict
+
+        except Exception as e:
+            self.logger.error(f"Action parsing error: {str(e)}")
+            return {
+                'action': 'HOLD',
+                'params': None,
+                'reason': f'Parse error: {str(e)}'
+            }
+
+    async def _generate_llm_response(self, prompt: str) -> str:
+        """Generate response from LLM with retries"""
+        try:
+            for attempt in range(self.max_retries):
+                try:
+                    response = ollama.generate(
+                        model=self.model,
+                        prompt=prompt,
+                        options={
+                            'temperature': 0.2,
+                            'num_predict': 150
+                        }
+                    )
+                    return response.get('response', '').strip()
+                except Exception as e:
+                    if attempt == self.max_retries - 1:
+                        raise
+                    self.logger.warning(f"LLM attempt {attempt + 1} failed: {str(e)}")
+                    continue
+                    
+        except Exception as e:
+            self.logger.error(f"LLM error after {self.max_retries} attempts: {str(e)}")
+            return ""
