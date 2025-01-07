@@ -17,6 +17,7 @@ from components.output_formatter import OutputFormatter
 from components.performance_tracker import PerformanceTracker
 from components.robinhood_authenticator import RobinhoodAuthenticator
 from components.position_manager import PositionManager
+from components.account_manager import AccountManager
 
 class TradingState(Enum):
     INITIALIZATION = auto()
@@ -79,12 +80,23 @@ class TradingSystem:
             self.output_formatter = OutputFormatter()
             self.performance_tracker = PerformanceTracker()
             
+            # Initialize account_manager before position_manager
+            self.account_manager = AccountManager(
+                config_manager=self.config_manager,
+                robinhood_client=None  # Since we're in analysis-only mode
+            )
+            
             self.analyzer = StockAnalyzer(self.config_manager)
-            self.position_manager = PositionManager(self.performance_tracker)
+            # Pass both required arguments
+            self.position_manager = PositionManager(
+                performance_tracker=self.performance_tracker,
+                account_manager=self.account_manager
+            )
+            
             self.trading_analyst = TradingAnalyst(
                 performance_tracker=self.performance_tracker,
                 position_manager=self.position_manager,
-                model=self.config_manager.get('llm_configuration.model', 'llama3:latest')
+                model=self.config_manager.get('llm.model', 'llama3:latest')
             )
             
             logging.info("All components initialized successfully")
@@ -141,7 +153,7 @@ class TradingSystem:
 
             # Only analyze for new setups during regular market hours unless in testing mode
             market_phase = self.market_monitor.get_market_phase()
-            if market_phase != 'regular' and not self.config_manager.get('testing_mode.enabled', False):
+            if market_phase != 'regular' and not self.config_manager.get('market.testing_mode.enabled', False):
                 return
 
             trading_setup = await self.trading_analyst.analyze_setup(stock_data)
@@ -238,7 +250,7 @@ class TradingSystem:
 
     async def _execute_trade(self, symbol: str, setup: Dict[str, Any]):
         try:
-            min_confidence = self.config_manager.get('trading_rules.min_setup_confidence', 75)
+            min_confidence = self.config_manager.get('trading.rules.entry.min_setup_confidence', 75)
             if setup.get('confidence', 0) <= min_confidence:
                 logging.info(f"Setup confidence {setup.get('confidence')}% below threshold")
                 return
@@ -304,23 +316,16 @@ class TradingSystem:
         """Generate end-of-day analysis and watchlist"""
         try:
             # Get today's performance
-            report = self.performance_tracker.generate_report(days=1)
-            logging.info(f"\nEnd of Day Report:\n{report}")
+            metrics = self.performance_tracker.get_metrics()
             
-            # Analyze closed positions
-            closed_positions = self.performance_tracker.get_trade_history(days=1)
-            if not closed_positions.empty:
-                win_rate = (closed_positions['profit_loss'] > 0).mean() * 100
-                total_pl = closed_positions['profit_loss'].sum()
-                avg_hold_time = closed_positions['time_held'].mean() if 'time_held' in closed_positions else 0
-                
-                logging.info(f"\nToday's Trading Summary:")
-                logging.info(f"Win Rate: {win_rate:.1f}%")
-                logging.info(f"Total P&L: ${total_pl:.2f}")
-                logging.info(f"Average Hold Time: {avg_hold_time:.1f} hours")
-                logging.info(f"Total Trades: {len(closed_positions)}")
+            logging.info("\nEnd of Day Report:")
+            logging.info(f"Total Trades: {metrics.get('total_trades', 0)}")
+            logging.info(f"Win Rate: {metrics.get('win_rate', 0):.1f}%")
+            logging.info(f"Average Profit/Loss: ${metrics.get('avg_profit_loss', 0):.2f}")
+            logging.info(f"Largest Win: ${metrics.get('largest_win', 0):.2f}")
+            logging.info(f"Largest Loss: ${metrics.get('largest_loss', 0):.2f}")
             
-            # Prepare for next session
+            # Reset daily metrics
             self.metrics.update({
                 'trades_analyzed': 0,
                 'setups_detected': 0,
@@ -377,7 +382,7 @@ class TradingSystem:
                 await self._update_state(TradingState.MARKET_SCANNING)
                 
                 symbols = await self.scanner.get_symbols(
-                    max_symbols=self.config_manager.get('system_settings.max_symbols', 100)
+                    max_symbols=self.config_manager.get('system.max_symbols', 100)
                 )
                 
                 # Add symbols from daily watchlist
@@ -407,7 +412,7 @@ class TradingSystem:
                 
                 await self._update_state(TradingState.COOLDOWN)
                 
-                scan_interval = self.config_manager.get('system_settings.scan_interval', 60)
+                scan_interval = self.config_manager.get('system.scan_interval', 60)
                 await asyncio.sleep(scan_interval)
             
             except Exception as e:
