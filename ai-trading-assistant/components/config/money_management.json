@@ -1,0 +1,71 @@
+{
+    "account_management": {
+        "starting_balance": 3000.00,
+        "risk_management": {
+            "max_account_risk": 50.0,         // Maximum % of account at risk at once
+            "cash_reserve_percent": 10.0,     // Keep 10% in cash
+            "position_sizing": {
+                "risk_per_trade_percent": 1.0, // Risk 1% of account per trade
+                "min_position_percent": 3.0,   // Minimum position size as % of account
+                "max_position_percent": 20.0,  // Maximum position size as % of account
+                "preferred_share_increment": 5  // Round share counts to multiples of 5
+            },
+            "limits": {
+                "max_daily_loss_percent": 3.0,  // Stop trading if down 3% in a day
+                "max_sector_percent": 30.0,     // Maximum % in one sector
+                "max_positions": 10             // Maximum number of concurrent positions
+            }
+        },
+        "performance_tracking": {
+            "track_realized_gains": true,
+            "track_unrealized_gains": true,
+            "high_water_mark": true
+        }
+    },
+    
+    "trading_rules": {
+        "entry": {
+            "min_setup_confidence": 75,
+            "require_volume_confirmation": true,
+            "require_trend_alignment": true,
+            "min_distance_from_vwap": 0.01
+        },
+        "exit": {
+            "use_trailing_stops": true,
+            "scale_out_enabled": true,
+            "scale_out_levels": [
+                {
+                    "percent_gain": 0.5,
+                    "exit_size": 0.3
+                },
+                {
+                    "percent_gain": 0.75,
+                    "exit_size": 0.3
+                },
+                {
+                    "percent_gain": 1.0,
+                    "exit_size": 0.4
+                }
+            ],
+            "time_based_exit": true,
+            "max_hold_time_hours": 48,
+            "max_adverse_excursion": 0.02
+        }
+    },
+    
+    "risk_limits": {
+        "daily": {
+            "max_new_positions": 5,
+            "max_loss_percent": 3.0,
+            "required_break_minutes": 30
+        },
+        "weekly": {
+            "max_loss_percent": 7.0,
+            "max_positions": 15
+        },
+        "monthly": {
+            "max_loss_percent": 15.0,
+            "required_profit_taking": true
+        }
+    }
+}
