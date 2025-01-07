@@ -83,7 +83,7 @@ The system can be configured through several JSON files in the `config` director
    - No real money involved
    - Full functionality for analysis and tracking
 
-2. **Live Trading Mode (Requires Robinhood)**
+2. **Live Trading Mode (Requires Robinhood)** - Not fully vetted
    - Real money trading through Robinhood
    - Requires API credentials
    - Enhanced risk management controls
