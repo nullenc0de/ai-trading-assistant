@@ -1,289 +1,181 @@
-# AI-Powered Stock Trading Assistant
+# AI Trading Assistant
 
-## 🚀 Overview
+An intelligent trading system that combines technical analysis, machine learning, and risk management to identify and execute trading opportunities in the stock market.
 
-### Project Description
-This is an advanced, AI-driven stock trading system designed to provide intelligent, data-driven trading insights using machine learning, technical analysis, and comprehensive market monitoring.
+## Overview
+
+AI Trading Assistant is a sophisticated trading platform that utilizes artificial intelligence to analyze market data, identify potential trading setups, and manage positions with strict risk management rules. The system is designed to operate in both paper trading and live trading modes through Robinhood integration.
 
 ### Key Features
-- 📊 Advanced Stock Scanning
-- 🤖 AI-Powered Trading Setup Generation
-- 📈 Technical Indicator Analysis
-- 🔐 Secure Robinhood Integration
-- 📝 Detailed Performance Tracking
-- ⏰ Market Hours Intelligence
-- 🛡️ Configurable Risk Management
 
-## 🖥️ System Requirements
+- Real-time market data analysis
+- AI-powered trading setup detection
+- Automated position management
+- Comprehensive risk management
+- Performance tracking and analysis
+- Pre-market and post-market analysis
+- Paper trading support
+- Robinhood integration (optional)
 
-### Minimum Hardware Requirements
-- Processor: Intel Core i5 or equivalent
-- RAM: 8GB 
-- Storage: 10GB free disk space
-- Internet Connection: Stable broadband
+## Installation
 
-### Recommended Hardware
-- Processor: Intel Core i7 or AMD Ryzen 7
-- RAM: 16GB
-- GPU: CUDA-enabled (for faster ML inference)
-- SSD Storage
-- High-speed internet connection
+### Prerequisites
 
-### Software Prerequisites
-- Python 3.9+
-- pip (Python package manager)
-- Ollama (Local Language Model)
-- Operating Systems: 
-  * Windows 10/11
-  * macOS 10.15+
-  * Linux (Ubuntu 20.04+ recommended)
+- Python 3.9 or higher
+- pip package manager
+- Git
 
-## 🔧 Installation Guide
+### Dependencies
 
-### 1. Prepare Your Environment
+- pandas
+- numpy
+- yfinance
+- ollama
+- colorama
+- tabulate
+- pytz
+- cryptography
 
-#### Windows
-```powershell
-# Open PowerShell as Administrator
-# Enable Python virtual environments
-Set-ExecutionPolicy RemoteSigned
+### Step-by-Step Installation
 
-# Create project directory
-mkdir ai-trading-assistant
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/ai-trading-assistant.git
 cd ai-trading-assistant
+```
 
-# Create virtual environment
+2. Create and activate a virtual environment:
+```bash
 python -m venv venv
-.\venv\Scripts\activate
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
-#### macOS/Linux
+3. Install required packages:
 ```bash
-# Create project directory
-mkdir ai-trading-assistant
-cd ai-trading-assistant
-
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
+pip install -r requirements.txt
 ```
 
-### 2. Install Dependencies
+4. Configure the system:
+```bash
+cp config/config.json.example config/config.json
+# Edit config.json with your preferred settings
+```
+
+## Usage
+
+### Starting the System
 
 ```bash
-# Upgrade pip
-pip install --upgrade pip
-
-# Install core dependencies
-pip install -r components/requirements.txt
-
-# Optional: Install development tools
-pip install -r components/requirements.txt
-```
-
-### 3. Install Ollama
-- Visit https://ollama.ai/
-- Download and install Ollama for your operating system
-- Pull Llama3 model:
-```bash
-ollama pull llama3
-```
-
-## 🔐 Robinhood Integration
-
-### Authentication Process
-1. First-time setup will prompt for Robinhood credentials
-2. Credentials are encrypted using Fernet symmetric encryption
-3. Stored securely with restricted file permissions
-
-### Credential Management Commands
-```python
-# Interactive Credential Management
-python -m components.robinhood_authenticator
-
-# Options:
-# 1. Save Credentials
-# 2. Load Credentials
-# 3. Remove Credentials
-```
-
-## 🚀 Running the Trading System
-
-### Basic Execution
-```bash
-# Activate virtual environment first
 python main.py
 ```
 
-### Command-Line Options
-```bash
-# Future planned options
-python main.py --config custom_config.json
-python main.py --paper-trade
-python main.py --backtest
-```
+### Configuration
 
-## 📊 Configuration
+The system can be configured through several JSON files in the `config` directory:
 
-### `config.json` Parameters
-```json
-{
-    "trading_filters": {
-        "min_price": 2.00,      // Minimum stock price
-        "max_price": 20.00,     // Maximum stock price
-        "min_volume": 500000,   // Minimum trading volume
-        "min_relative_volume": 5.0  // Minimum relative volume
-    },
-    "system_settings": {
-        "scan_interval": 60,    // Scan frequency (seconds)
-        "max_symbols_to_analyze": 100  // Max symbols per scan
-    },
-    "risk_management": {
-        "max_position_size": 1000,  // Max shares per trade
-        "risk_per_trade": 0.02      // Maximum risk percentage
-    }
-}
-```
+- `config.json`: Main system configuration
+- `money_management.json`: Risk and position sizing settings
 
-## 📈 Performance Tracking
+### Operation Modes
 
-### Logging Details
-- Stored in `performance_logs/trades.csv`
-- Tracks:
-  * Timestamp
-  * Symbol
-  * Entry Price
-  * Confidence Level
-  * Trading Setup Details
+1. **Paper Trading Mode**
+   - Default mode for testing strategies
+   - No real money involved
+   - Full functionality for analysis and tracking
 
-### Performance Report Metrics
-- Total Trades
-- Confidence Level Statistics
-- Symbol Performance
-- Potential Profit/Loss Analysis
+2. **Live Trading Mode (Requires Robinhood)**
+   - Real money trading through Robinhood
+   - Requires API credentials
+   - Enhanced risk management controls
 
-## 🛡️ Risk Management
+### Monitoring and Logging
 
-### Key Risk Mitigation Strategies
-- Configurable position sizing
-- Confidence-based trade selection
-- Technical indicator analysis
-- AI-powered setup validation
+- All activities are logged in `logs/trading_system.log`
+- Debug information in `logs/trading_system_debug.log`
+- Performance metrics stored in `logs/performance/`
 
-## 🔍 Technical Analysis Indicators
+## System Architecture
 
-### Calculated Indicators
-1. RSI (Relative Strength Index)
-   - Momentum oscillator
-   - Measures speed of price changes
+### Components
 
-2. VWAP (Volume Weighted Average Price)
-   - Institutional trading reference
-   - Shows average price weighted by volume
+1. **Market Monitor**
+   - Tracks market hours and conditions
+   - Manages trading sessions
 
-3. Moving Averages
-   - SMA (Simple Moving Average)
-   - EMA (Exponential Moving Average)
+2. **Stock Scanner**
+   - Identifies potential trading candidates
+   - Filters based on volume and price criteria
 
-4. ATR (Average True Range)
-   - Volatility indicator
-   - Helps determine stop-loss levels
+3. **Stock Analyzer**
+   - Performs technical analysis
+   - Calculates key indicators
 
-## 🤖 AI Trading Setup Generation
+4. **Trading Analyst**
+   - AI-powered setup detection
+   - Position analysis and management
 
-### Machine Learning Process
-1. Collect stock data
-2. Calculate technical indicators
-3. Generate comprehensive prompt
-4. Use Llama3 to analyze setup
-5. Validate and format response
+5. **Position Manager**
+   - Executes trading decisions
+   - Manages stop losses and exits
 
-## 📋 Logging and Monitoring
+6. **Performance Tracker**
+   - Records all trading activity
+   - Generates performance metrics
 
-### System Logs
-- Location: `logs/trading_system.log`
-- Captures:
-  * System events
-  * Errors
-  * Trading decisions
-  * Performance metrics
+## Contributing
 
-## ⚠️ Important Disclaimers
+We welcome contributions to improve the AI Trading Assistant. Please follow these steps:
 
-### Legal and Financial Warning
-- THIS IS AN EXPERIMENTAL TRADING SYSTEM
-- NO GUARANTEED PROFITS
-- HIGH FINANCIAL RISK
-- SIMULATED TRADING RECOMMENDED
-- CONSULT FINANCIAL PROFESSIONALS
-
-## 🔬 Troubleshooting
-
-### Common Issues
-1. Ollama not running
-   - Ensure Ollama is installed and Llama3 is pulled
-   - Check Ollama service status
-
-2. Dependency Errors
-   - Verify Python version
-   - Recreate virtual environment
-   - Reinstall dependencies
-
-3. Market Data Issues
-   - Check internet connectivity
-   - Verify stock data source availability
-
-## 🤝 Contributing
-
-### Development Workflow
 1. Fork the repository
-2. Create feature branch
-3. Implement changes
-4. Write tests
-5. Submit pull request
+2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
-### Code Style
-- Follow PEP 8 guidelines
-- Use type hints
-- Write comprehensive docstrings
-- 100% test coverage for new features
+### Development Guidelines
 
-## 📄 Licensing
+- Follow PEP 8 style guide
+- Add unit tests for new features
+- Update documentation as needed
+- Maintain type hints and docstrings
 
-### MIT License
-- Commercial use allowed
-- Modifications permitted
-- Private and commercial use
-- No liability
-- Must include original license
+## License
 
-## 📞 Support
+This project is licensed under the Commercial License - see the [LICENSE](LICENSE) file for details.
 
-### Community Support
-- GitHub Issues
-- Discussion Forums
-- Email Support
+### Commercial Use
 
-### Professional Support
-- Consulting available
-- Custom feature development
-- Enterprise integration
+This software is protected by copyright and cannot be used for commercial purposes without explicit permission. To obtain a commercial license, please contact:
 
-## 🔮 Future Roadmap
+Email: [your-email@example.com]
+Website: [your-website.com]
 
-### Planned Features
-- Multiple broker integrations
-- Advanced machine learning models
-- Real-time news sentiment analysis
-- Backtesting framework
-- Mobile app
-- Cloud deployment options
+### Permitted Use
 
-## 🙏 Acknowledgments
-- Ollama Team
-- Robinhood
-- Open-source community contributors
+- Personal use
+- Educational purposes
+- Non-commercial research
 
----
+### Prohibited Use
 
-**Remember**: Investing involves risk. Always do your own research and never invest more than you can afford to lose.
+- Commercial deployment
+- Integration into commercial products
+- Resale or redistribution
+
+## Disclaimer
+
+This software is for educational and research purposes only. It is not intended to provide financial advice. Trading stocks carries significant risks, and past performance is not indicative of future results. Users of this software assume all risks associated with its use.
+
+## Support
+
+For support, bug reports, or feature requests, please:
+
+1. Check the [Issues](https://github.com/yourusername/ai-trading-assistant/issues) page
+2. Create a new issue if needed
+3. Join our community Discord [link]
+
+## Acknowledgments
+
+- Thanks to all contributors
+- Special thanks to the open-source community
+- Powered by [Ollama](https://github.com/ollama/ollama) for AI capabilities
