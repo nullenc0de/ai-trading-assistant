@@ -139,10 +139,6 @@ We welcome contributions to improve the AI Trading Assistant. Please follow thes
 - Update documentation as needed
 - Maintain type hints and docstrings
 
-## License
-
-This project is licensed under the Commercial License - see the [LICENSE](LICENSE) file for details.
-
 ### Commercial Use
 
 This software is protected by copyright and cannot be used for commercial purposes without explicit permission.
