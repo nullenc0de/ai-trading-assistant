@@ -1,9 +1,16 @@
 """
 Position Manager Module
+---------------------
+Handles position management, risk management, and trade execution.
+Includes automatic stop loss enforcement and position sizing.
+
+Author: AI Trading Assistant
+Version: 2.1
+Last Updated: 2025-01-07
 """
 
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 from datetime import datetime
 import pandas as pd
 
@@ -14,103 +21,82 @@ class PositionManager:
         self.logger = logging.getLogger(__name__)
         self.open_positions: Dict[str, Any] = {}
 
-    def calculate_position_size(self, symbol: str, entry_price: float, stop_price: float) -> Dict[str, Any]:
-        """Calculate appropriate position size based on risk parameters"""
-        try:
-            # Get account metrics
-            account_value = self.account_manager.get_account_metrics()['current_balance']
-            risk_per_trade = self.account_manager.config.get(
-                'account_management.risk_management.position_sizing.risk_per_trade_percent', 1.0
-            )
-            
-            # Calculate risk amounts
-            max_risk_amount = (account_value * risk_per_trade) / 100
-            risk_per_share = abs(entry_price - stop_price)
-            
-            if risk_per_share == 0:
-                return {'error': 'Invalid risk per share'}
-            
-            # Calculate shares based on risk
-            shares = int(max_risk_amount / risk_per_share)
-            position_value = shares * entry_price
-            
-            # Apply position size limits
-            max_position_pct = self.account_manager.config.get(
-                'account_management.risk_management.position_sizing.max_position_percent', 20.0
-            )
-            max_position_value = (account_value * max_position_pct) / 100
-            
-            if position_value > max_position_value:
-                shares = int(max_position_value / entry_price)
-                position_value = shares * entry_price
-            
-            return {
-                'shares': shares,
-                'position_value': position_value,
-                'risk_amount': shares * risk_per_share,
-                'risk_percent': (shares * risk_per_share / account_value) * 100
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Position sizing error for {symbol}: {str(e)}")
-            return {'error': str(e)}
-
     async def handle_position_action(self, symbol: str, action: Dict[str, Any], 
                                    position: Dict[str, Any], current_data: Dict[str, Any]) -> None:
-        """Handle position actions with validation"""
+        """Handle position actions with strict stop loss enforcement"""
         try:
             # Validate inputs
-            if not all(k in position for k in ['entry_price', 'size']):
+            if not all(k in position for k in ['entry_price', 'size', 'stop_price']):
                 raise ValueError(f"Invalid position data for {symbol}")
             if not current_data.get('current_price'):
                 raise ValueError(f"Missing current price for {symbol}")
 
-            action_type = action.get('action', 'HOLD').upper()
             current_price = float(current_data['current_price'])
+            stop_price = float(position['stop_price'])
+            entry_price = float(position['entry_price'])
             
+            # First check if stop loss is hit - this overrides any LLM decision
+            if current_price <= stop_price:
+                self.logger.info(f"Stop loss triggered for {symbol} at ${current_price:.2f}")
+                await self._handle_exit(symbol, current_price, position, {
+                    'action': 'EXIT',
+                    'reason': f"Stop loss triggered at ${current_price:.2f}"
+                })
+                return
+
+            # Check for large adverse moves (2% below entry)
+            adverse_move = (entry_price - current_price) / entry_price
+            if adverse_move > 0.02:  # 2% loss
+                self.logger.info(f"Large adverse move detected for {symbol}: {adverse_move:.2%}")
+                await self._handle_exit(symbol, current_price, position, {
+                    'action': 'EXIT',
+                    'reason': f"Large adverse move of {adverse_move:.2%}"
+                })
+                return
+
+            # Handle normal position management
+            action_type = action.get('action', 'HOLD').upper()
             self.logger.info(f"Handling action for {symbol}: {action_type}")
-            self.logger.info(f"Action details: {action}")
             
             if action_type == 'EXIT':
                 await self._handle_exit(symbol, current_price, position, action)
-                
             elif action_type == 'PARTIAL_EXIT':
                 await self._handle_partial_exit(symbol, current_price, position, action)
-                
             elif action_type == 'ADJUST_STOPS':
                 await self._handle_stop_adjustment(symbol, position, action)
-                
             elif action_type == 'HOLD':
-                self.logger.info(f"Maintaining position in {symbol}: {action.get('reason', 'No reason provided')}")
-            
-            else:
-                self.logger.warning(f"Unknown action type: {action_type}")
-
-            # Update position tracking
-            if symbol in self.open_positions:
+                # Update position tracking even on hold
                 self._update_position_metrics(symbol, current_price)
+                self.logger.info(f"Maintaining position in {symbol}: {action.get('reason', 'No reason provided')}")
 
         except Exception as e:
             self.logger.error(f"Position action error for {symbol}: {str(e)}")
 
     async def _handle_exit(self, symbol: str, current_price: float, 
                          position: Dict[str, Any], action: Dict[str, Any]) -> None:
-        """Handle position exit"""
+        """Handle position exit with P&L calculation"""
         try:
             entry_price = float(position['entry_price'])
             position_size = float(position['size'])
+            
+            # Calculate P&L
+            profit_loss = (current_price - entry_price) * position_size
+            profit_loss_percent = ((current_price / entry_price) - 1) * 100
             
             exit_data = {
                 'status': 'CLOSED',
                 'exit_price': current_price,
                 'exit_time': datetime.now().isoformat(),
-                'profit_loss': (current_price - entry_price) * position_size,
-                'profit_loss_percent': ((current_price / entry_price) - 1) * 100,
+                'profit_loss': profit_loss,
+                'profit_loss_percent': profit_loss_percent,
                 'notes': f"Exit reason: {action.get('reason', 'No reason provided')}"
             }
             
             if self.performance_tracker.update_trade(symbol, exit_data):
-                self.logger.info(f"Closed position in {symbol} at ${current_price:.2f}")
+                self.logger.info(
+                    f"Closed position in {symbol} at ${current_price:.2f} "
+                    f"(P&L: ${profit_loss:.2f}, {profit_loss_percent:.2f}%)"
+                )
                 
                 # Remove from open positions tracking
                 if symbol in self.open_positions:
@@ -120,6 +106,89 @@ class PositionManager:
                 
         except Exception as e:
             self.logger.error(f"Exit handling error for {symbol}: {str(e)}")
+
+    def _update_position_metrics(self, symbol: str, current_price: float) -> None:
+        """Update metrics for an open position and check risk limits"""
+        try:
+            if symbol not in self.open_positions:
+                return
+                
+            position = self.open_positions[symbol]
+            entry_price = position['entry_price']
+            shares = position['shares']
+            
+            # Update current values
+            position['current_price'] = current_price
+            position['current_value'] = current_price * shares
+            position['unrealized_pl'] = (current_price - entry_price) * shares
+            position['unrealized_pl_percent'] = ((current_price / entry_price) - 1) * 100
+            
+            # Update high/low prices
+            position['high_price'] = max(position.get('high_price', current_price), current_price)
+            position['low_price'] = min(position.get('low_price', current_price), current_price)
+            
+            # Check risk thresholds
+            self._check_risk_thresholds(symbol, position)
+            
+        except Exception as e:
+            self.logger.error(f"Error updating position metrics for {symbol}: {str(e)}")
+
+    def _check_risk_thresholds(self, symbol: str, position: Dict[str, Any]) -> None:
+        """Check if position has breached any risk thresholds"""
+        try:
+            unrealized_pl_percent = position['unrealized_pl_percent']
+            
+            # Check maximum adverse excursion
+            max_adverse_excursion = self.account_manager.config.get(
+                'trading.rules.exit.max_adverse_excursion', 0.02
+            )
+            
+            if unrealized_pl_percent < -max_adverse_excursion * 100:
+                self.logger.warning(
+                    f"{symbol} has exceeded maximum adverse excursion: {unrealized_pl_percent:.2f}%"
+                )
+                # This could trigger an automatic exit if desired
+            
+            # Check time-based exit if enabled
+            if self.account_manager.config.get('trading.rules.exit.time_based_exit', False):
+                max_hold_hours = self.account_manager.config.get(
+                    'trading.rules.exit.max_hold_time_hours', 48
+                )
+                
+                hold_time = (
+                    datetime.now() - 
+                    datetime.fromisoformat(position['entry_time'])
+                ).total_seconds() / 3600
+                
+                if hold_time > max_hold_hours:
+                    self.logger.warning(
+                        f"{symbol} has exceeded maximum hold time: {hold_time:.1f} hours"
+                    )
+                    # This could trigger an automatic exit if desired
+            
+        except Exception as e:
+            self.logger.error(f"Error checking risk thresholds for {symbol}: {str(e)}")
+
+    def _record_closed_position(self, symbol: str, exit_data: Dict[str, Any]) -> None:
+        """Record position closure details"""
+        try:
+            position = self.open_positions.pop(symbol)
+            
+            # Calculate final metrics
+            position.update({
+                'exit_price': exit_data['exit_price'],
+                'exit_time': exit_data['exit_time'],
+                'final_pl': exit_data['profit_loss'],
+                'final_pl_percent': exit_data['profit_loss_percent'],
+                'hold_time_hours': (
+                    datetime.fromisoformat(exit_data['exit_time']) - 
+                    datetime.fromisoformat(position['entry_time'])
+                ).total_seconds() / 3600,
+                'status': 'CLOSED'
+            })
+            
+        except Exception as e:
+            self.logger.error(f"Error recording closed position for {symbol}: {str(e)}")
 
     async def _handle_partial_exit(self, symbol: str, current_price: float, 
                                 position: Dict[str, Any], action: Dict[str, Any]) -> None:
@@ -168,37 +237,41 @@ class PositionManager:
 
     async def _handle_stop_adjustment(self, symbol: str, position: Dict[str, Any], 
                                    action: Dict[str, Any]) -> None:
-        """Handle stop loss adjustment"""
+        """Handle stop loss adjustment with validation"""
         try:
             if not action.get('params'):
                 self.logger.error(f"Missing stop price parameters for {symbol}")
                 return
                 
+            entry_price = float(position['entry_price'])
+            current_price = float(position['current_price'])
+            
             try:
+                # Parse new stop price
                 params_str = action['params']
                 if '=' in params_str:
                     new_stop = float(params_str.split('=')[1].strip())
                 else:
                     new_stop = float(params_str.strip())
-                    
+                
                 # Validate new stop price
-                entry_price = float(position['entry_price'])
-                if new_stop >= entry_price:
-                    self.logger.warning(f"Invalid stop price for {symbol}: above entry price")
+                if new_stop >= current_price:
+                    self.logger.warning(f"Invalid stop price for {symbol}: above current price")
                     return
                     
                 # Check if new risk is acceptable
                 position_size = float(position['size'])
-                new_risk = (entry_price - new_stop) * position_size
+                new_risk = (current_price - new_stop) * position_size
                 account_value = self.account_manager.get_account_metrics()['current_balance']
                 max_risk_percent = self.account_manager.config.get(
-                    'account_management.risk_management.position_sizing.risk_per_trade_percent', 1.0
+                    'account.risk_management.position_sizing.risk_per_trade_percent', 1.0
                 )
                 
                 if (new_risk / account_value) * 100 > max_risk_percent:
                     self.logger.warning(f"New stop would exceed risk limits for {symbol}")
                     return
                 
+                # Update stop price
                 update_data = {
                     'stop_price': new_stop,
                     'notes': f"Stop adjusted to ${new_stop:.2f}. Reason: {action.get('reason', 'No reason provided')}"
@@ -218,87 +291,3 @@ class PositionManager:
                 
         except Exception as e:
             self.logger.error(f"Stop adjustment error for {symbol}: {str(e)}")
-
-    def _update_position_metrics(self, symbol: str, current_price: float) -> None:
-        """Update metrics for an open position"""
-        try:
-            if symbol not in self.open_positions:
-                return
-                
-            position = self.open_positions[symbol]
-            entry_price = position['entry_price']
-            shares = position['shares']
-            
-            # Update current values
-            position['current_price'] = current_price
-            position['current_value'] = current_price * shares
-            position['unrealized_pl'] = (current_price - entry_price) * shares
-            position['unrealized_pl_percent'] = ((current_price / entry_price) - 1) * 100
-            
-            # Update high/low prices
-            position['high_price'] = max(position.get('high_price', current_price), current_price)
-            position['low_price'] = min(position.get('low_price', current_price), current_price)
-            
-        except Exception as e:
-            self.logger.error(f"Error updating position metrics for {symbol}: {str(e)}")
-
-    def _record_closed_position(self, symbol: str, exit_data: Dict[str, Any]) -> None:
-        """Record position closure details"""
-        try:
-            position = self.open_positions.pop(symbol)
-            
-            # Calculate final metrics
-            position.update({
-                'exit_price': exit_data['exit_price'],
-                'exit_time': exit_data['exit_time'],
-                'final_pl': exit_data['profit_loss'],
-                'final_pl_percent': exit_data['profit_loss_percent'],
-                'hold_time_hours': (
-                    datetime.fromisoformat(exit_data['exit_time']) - 
-                    datetime.fromisoformat(position['entry_time'])
-                ).total_seconds() / 3600,
-                'status': 'CLOSED'
-            })
-            
-        except Exception as e:
-            self.logger.error(f"Error recording closed position for {symbol}: {str(e)}")
-
-    def get_portfolio_metrics(self) -> Dict[str, Any]:
-        """Get current portfolio metrics"""
-        try:
-            metrics = {
-                'open_positions_count': len(self.open_positions),
-                'total_exposure': sum(pos['current_value'] for pos in self.open_positions.values()),
-                'total_unrealized_pl': sum(pos['unrealized_pl'] for pos in self.open_positions.values()),
-                'positions': {}
-            }
-            
-            account_value = self.account_manager.get_account_metrics()['current_balance']
-            
-            # Calculate exposure and risk metrics
-            if account_value > 0:
-                metrics['total_exposure_percent'] = (metrics['total_exposure'] / account_value) * 100
-                metrics['total_unrealized_pl_percent'] = (metrics['total_unrealized_pl'] / account_value) * 100
-            
-            # Add individual position details
-            for symbol, position in self.open_positions.items():
-                metrics['positions'][symbol] = {
-                    'current_price': position['current_price'],
-                    'entry_price': position['entry_price'],
-                    'shares': position['shares'],
-                    'current_value': position['current_value'],
-                    'unrealized_pl': position['unrealized_pl'],
-                    'unrealized_pl_percent': position['unrealized_pl_percent'],
-                    'high_price': position.get('high_price'),
-                    'low_price': position.get('low_price'),
-                    'hold_time_hours': (
-                        datetime.now() - 
-                        datetime.fromisoformat(position['entry_time'])
-                    ).total_seconds() / 3600
-                }
-            
-            return metrics
-            
-        except Exception as e:
-            self.logger.error(f"Error getting portfolio metrics: {str(e)}")
-            return {}
