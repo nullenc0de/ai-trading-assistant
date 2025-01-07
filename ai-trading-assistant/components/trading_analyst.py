@@ -198,7 +198,7 @@ If no valid setup is found, respond only with: NO SETUP FOUND"""
                         prompt=prompt,
                         options={
                             'temperature': 0.2,
-                            'num_predict': 150
+                            'num_predict': 200
                         }
                     )
                     return response.get('response', '').strip()
