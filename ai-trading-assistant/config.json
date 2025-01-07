@@ -1,64 +1,129 @@
 {
     "config_version": "2.0",
-    "last_updated": "2025-01-03T00:00:00",
+    "last_updated": "2025-01-07T00:00:00",
     
     "trading_filters": {
         "min_price": 2.00,
         "max_price": 20.00,
         "min_volume": 500000,
         "min_rel_volume": 5.0,
-        "max_spread_percent": 0.02
+        "max_spread_percent": 0.02,
+        "min_atr": 0.10,
+        "exclude_sectors": ["Cryptocurrencies"],
+        "exclude_exchanges": ["OTC", "PINK"]
     },
     
     "system_settings": {
         "scan_interval": 60,
         "max_symbols": 100,
         "parallel_analysis": true,
-        "analysis_timeout": 30
+        "analysis_timeout": 30,
+        "cache_duration": 300,
+        "debug_mode": false,
+        "log_level": "INFO"
     },
     
     "risk_management": {
-        "max_position_size_percent": 15.0,
-        "max_risk_per_trade_percent": 1.0,
-        "min_position_size": 100,
-        "max_daily_trades": 10,
-        "max_daily_loss_percent": 3.0,
-        "profit_taking_intervals": [0.5, 0.75, 1.0],
-        "min_reward_risk_ratio": 2.0,
-        "scale_out_levels": {
-            "level_1": {
-                "percent_gain": 0.5,
-                "position_size": 0.3
-            },
-            "level_2": {
-                "percent_gain": 0.75,
-                "position_size": 0.3
-            },
-            "level_3": {
-                "percent_gain": 1.0,
-                "position_size": 0.4
+        "account": {
+            "starting_balance": 100000,
+            "max_daily_loss_percent": 3.0,
+            "max_total_exposure": 50.0,
+            "max_correlated_exposure": 20.0
+        },
+        "position": {
+            "default_size_percent": 1.0,
+            "max_size_percent": 2.0,
+            "min_size_percent": 0.5,
+            "size_increment": 0.5,
+            "max_trades_per_symbol": 1
+        },
+        "trade": {
+            "min_risk_reward": 2.0,
+            "max_risk_per_trade_percent": 1.0,
+            "profit_taking_intervals": [0.5, 0.75, 1.0],
+            "trailing_stop_activation": 0.5,
+            "trailing_stop_distance": 0.2
+        },
+        "time": {
+            "max_hold_days": 5,
+            "min_trade_interval": 60,
+            "max_daily_trades": 10,
+            "restricted_hours": {
+                "start": "09:30",
+                "end": "16:00"
             }
         }
     },
     
     "trading_rules": {
-        "min_setup_confidence": 75,
-        "max_spread_percent": 0.02,
-        "require_volume_confirmation": true,
-        "require_price_confirmation": true
+        "entry": {
+            "min_setup_confidence": 75,
+            "require_volume_confirmation": true,
+            "require_trend_alignment": true,
+            "min_distance_from_vwap": 0.01,
+            "max_spread_percent": 0.02
+        },
+        "exit": {
+            "use_trailing_stops": true,
+            "scale_out_enabled": true,
+            "time_based_exit": true,
+            "max_adverse_excursion": 0.02
+        },
+        "filters": {
+            "min_adx": 20,
+            "max_rsi": 70,
+            "min_rsi": 30,
+            "volume_ma_periods": 20
+        }
     },
     
     "llm_configuration": {
         "model": "llama3:latest",
         "temperature": 0.7,
         "max_tokens": 300,
-        "retry_attempts": 3
+        "retry_attempts": 3,
+        "retry_delay": 1,
+        "timeout": 10,
+        "prompts": {
+            "setup_analysis": "templates/setup_analysis.txt",
+            "position_management": "templates/position_management.txt"
+        }
     },
     
     "performance_tracking": {
         "log_dir": "performance_logs",
-        "metrics_update_interval": 300,
-        "track_risk_metrics": true,
-        "track_portfolio_metrics": true
+        "metrics_update_interval": 60,
+        "save_charts": true,
+        "track_metrics": {
+            "risk_metrics": true,
+            "portfolio_metrics": true,
+            "trade_metrics": true,
+            "execution_metrics": true
+        },
+        "reporting": {
+            "generate_daily_report": true,
+            "generate_weekly_report": true,
+            "email_reports": false,
+            "save_to_file": true
+        }
+    },
+
+    "backtesting": {
+        "enabled": false,
+        "data_source": "yahoo",
+        "start_date": "2024-01-01",
+        "end_date": "2024-12-31",
+        "include_extended_hours": false,
+        "commission": 0.0,
+        "slippage": 0.0
+    },
+    
+    "notifications": {
+        "enabled": true,
+        "channels": ["console", "log"],
+        "trade_alerts": true,
+        "position_updates": true,
+        "performance_updates": true,
+        "error_alerts": true
     }
 }
