@@ -1,19 +1,5 @@
 """
 Position Manager Module
-----------------------
-Handles all aspects of position management including:
-- Position entry and exit execution
-- Position sizing and risk calculations
-- Stop loss management
-- Portfolio metrics tracking
-- Risk management enforcement
-
-This module integrates with the account manager and performance tracker
-to maintain a complete view of the trading system's positions and risk exposure.
-
-Author: AI Trading Assistant
-Version: 2.0
-Last Updated: 2025-01-07
 """
 
 import logging
