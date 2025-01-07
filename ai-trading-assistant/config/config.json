@@ -7,21 +7,21 @@
         "risk_management": {
             "cash_reserve_percent": 10.0,
             "position_sizing": {
-                "risk_per_trade_percent": 1.0,
-                "min_position_percent": 3.0,
-                "max_position_percent": 20.0,
-                "preferred_share_increment": 5
+                "risk_per_trade_percent": 2.0,
+                "min_position_percent": 10.0,
+                "max_position_percent": 30.0,
+                "preferred_share_increment": 10
             },
             "limits": {
-                "max_daily_loss_percent": 3.0,
-                "max_positions": 10,
-                "max_sector_percent": 30.0
+                "max_daily_loss_percent": 5.0,
+                "max_positions": 5,
+                "max_sector_percent": 40.0
             },
             "scaling": {
                 "scale_out_levels": [
-                    {"percent_gain": 0.5, "exit_size": 0.3},
-                    {"percent_gain": 0.75, "exit_size": 0.3},
-                    {"percent_gain": 1.0, "exit_size": 0.4}
+                    {"percent_gain": 1.0, "exit_size": 0.3},
+                    {"percent_gain": 2.0, "exit_size": 0.3},
+                    {"percent_gain": 3.0, "exit_size": 0.4}
                 ]
             }
         }
@@ -48,27 +48,33 @@
 
     "trading": {
         "filters": {
-            "min_price": 2.00,
-            "max_price": 20.00,
+            "min_price": 5.00,
+            "max_price": 100.00,
             "min_volume": 500000,
-            "min_rel_volume": 5.0,
+            "min_rel_volume": 2.0,
             "max_spread_percent": 0.02,
-            "min_atr": 0.10,
+            "min_atr": 0.20,
             "exclude_sectors": ["Cryptocurrencies"],
             "exclude_exchanges": ["OTC", "PINK"]
         },
         "rules": {
             "entry": {
-                "min_setup_confidence": 75,
+                "min_setup_confidence": 85,
+                "min_reward_risk_ratio": 3.0,
                 "require_volume_confirmation": true,
                 "require_trend_alignment": true,
-                "min_distance_from_vwap": 0.01
+                "min_distance_from_vwap": 0.02
             },
             "exit": {
                 "use_trailing_stops": true,
                 "time_based_exit": true,
                 "max_hold_time_hours": 48,
-                "max_adverse_excursion": 0.02
+                "max_adverse_excursion": 0.02,
+                "profit_taking": {
+                    "enable_partial_exits": true,
+                    "first_target_multiplier": 1.5,
+                    "final_target_multiplier": 3.0
+                }
             },
             "indicators": {
                 "min_adx": 20,
@@ -107,10 +113,55 @@
 
     "llm": {
         "model": "llama3:latest",
-        "temperature": 0.7,
+        "temperature": 0.2,
         "max_tokens": 300,
         "retry_attempts": 3,
         "retry_delay": 1,
         "timeout": 10
+    },
+
+    "alerts": {
+        "enable_notifications": true,
+        "notification_types": {
+            "trade_entry": true,
+            "trade_exit": true,
+            "stop_hit": true,
+            "target_hit": true,
+            "error": true
+        },
+        "notification_channels": {
+            "console": true,
+            "log": true,
+            "webhook": false
+        }
+    },
+
+    "strategy_adjustments": {
+        "learning_mode": {
+            "enabled": true,
+            "min_trades_before_adjust": 20,
+            "performance_review_interval": 24,
+            "auto_adjust_parameters": true
+        },
+        "market_conditions": {
+            "high_volatility": {
+                "increase_position_size": false,
+                "tighten_stops": true,
+                "reduce_hold_time": true
+            },
+            "low_volatility": {
+                "decrease_position_size": true,
+                "widen_stops": false,
+                "extend_hold_time": true
+            }
+        }
+    },
+
+    "recovery_mode": {
+        "enable_recovery_mode": true,
+        "activation_threshold_percent": -5.0,
+        "position_size_reduction": 50,
+        "min_reward_risk_increase": 1.0,
+        "auto_disable_threshold": 0.0
     }
 }
