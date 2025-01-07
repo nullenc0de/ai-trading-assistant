@@ -1,3 +1,14 @@
+"""
+Trading Analyst Module
+--------------------
+Analyzes market data and makes trading decisions using LLM.
+Includes position analysis, setup detection, and risk management.
+
+Author: AI Trading Assistant
+Version: 2.1
+Last Updated: 2025-01-07
+"""
+
 import logging
 import re
 from typing import Dict, Any, Optional
@@ -13,6 +24,33 @@ class TradingAnalyst:
         self.performance_tracker = performance_tracker
         self.position_manager = position_manager
 
+    def _should_force_exit(self, current_price: float, position_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Check if position requires forced exit based on risk management rules"""
+        try:
+            entry_price = float(position_data['entry_price'])
+            stop_price = float(position_data['stop_price'])
+            
+            # Check stop loss violation
+            if current_price <= stop_price:
+                return {
+                    'action': 'EXIT',
+                    'reason': f'Stop loss violated: Current price ${current_price:.2f} at or below stop ${stop_price:.2f}'
+                }
+            
+            # Check adverse move (loss > 2%)
+            loss_percent = ((current_price - entry_price) / entry_price) * 100
+            if loss_percent < -2.0:
+                return {
+                    'action': 'EXIT',
+                    'reason': f'Large adverse move: Position down {abs(loss_percent):.1f}%'
+                }
+                
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Error checking force exit conditions: {str(e)}")
+            return None
+
     async def analyze_position(self, stock_data: Dict[str, Any], position_data: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze an existing position and determine action"""
         try:
@@ -25,13 +63,20 @@ class TradingAnalyst:
             if not all(field in position_data for field in required_position_fields):
                 raise ValueError("Missing required position data fields")
 
-            entry_price = float(position_data['entry_price'])
             current_price = float(stock_data['current_price'])
+            
+            # First check for forced exit conditions
+            force_exit = self._should_force_exit(current_price, position_data)
+            if force_exit:
+                self.logger.info(f"Forced exit for {stock_data['symbol']}: {force_exit['reason']}")
+                return force_exit
+
+            entry_price = float(position_data['entry_price'])
             position_size = float(position_data.get('size', 100))
             
             # Calculate position metrics
             unrealized_pl = (current_price - entry_price) * position_size
-            unrealized_pl_pct = ((current_price / entry_price) - 1) * 100
+            unrealized_pl_pct = ((current_price - entry_price) / entry_price) * 100
             
             # Risk multiple calculation with validation
             stop_distance = abs(entry_price - float(position_data['stop_price']))
@@ -47,7 +92,25 @@ class TradingAnalyst:
             response = await self._generate_llm_response(prompt)
             self.logger.info(f"LLM Response for position analysis ({stock_data['symbol']}):\n{response}")
             
+            # Parse and validate LLM action
             action = self._parse_position_action(response)
+            
+            # Override HOLD if conditions warrant
+            if action['action'] == 'HOLD':
+                # Exit if we're very close to stop loss (within 10% of distance)
+                stop_buffer = (current_price - float(position_data['stop_price'])) / stop_distance
+                if stop_buffer < 0.1:
+                    action = {
+                        'action': 'EXIT',
+                        'reason': f'Too close to stop loss (buffer: {stop_buffer:.1%})'
+                    }
+                
+                # Exit if we're down more than 1.5%
+                elif unrealized_pl_pct < -1.5:
+                    action = {
+                        'action': 'EXIT',
+                        'reason': f'Position down {abs(unrealized_pl_pct):.1f}%'
+                    }
             
             if action['action'] not in ['HOLD', 'EXIT', 'PARTIAL_EXIT', 'ADJUST_STOPS']:
                 self.logger.warning(f"Invalid action type received: {action['action']}")
@@ -69,7 +132,7 @@ class TradingAnalyst:
     def _generate_position_prompt(self, stock_data: Dict[str, Any], position_data: Dict[str, Any],
                                 unrealized_pl: float, unrealized_pl_pct: float, risk_multiple: float) -> str:
         """Generate position analysis prompt"""
-        return f"""Analyze position and decide next action:
+        return f"""Analyze position and decide next action. BE AGGRESSIVE about cutting losses - exit if down more than 1.5% or near stop loss.
 
 Position: {stock_data['symbol']}
 Entry: ${position_data['entry_price']:.2f}
@@ -86,10 +149,10 @@ VWAP: ${stock_data.get('technical_indicators', {}).get('vwap', 'N/A')}
 ATR: {stock_data.get('technical_indicators', {}).get('atr', 'N/A')}
 
 Choose action:
-1. HOLD - Keep position
-2. EXIT - Close position
-3. PARTIAL_EXIT - Exit half position
-4. ADJUST_STOPS - Move stops
+1. HOLD - Keep position (only if confident of upside)
+2. EXIT - Close position (default choice if any doubt)
+3. PARTIAL_EXIT - Exit half position (for reducing risk)
+4. ADJUST_STOPS - Move stops (only higher, never lower)
 
 Format response exactly as:
 ACTION: [action type]
@@ -103,17 +166,24 @@ REASON: [single line explanation]"""
             if not isinstance(stock_data, dict) or 'symbol' not in stock_data:
                 return "NO SETUP FOUND"
 
-            prompt = f"""Analyze the following stock data and determine if there is a valid trading setup:
+            prompt = f"""Analyze the following stock data and determine if there is a valid trading setup.
+BE VERY SELECTIVE - only identify high probability setups with clear risk/reward.
 
 {json.dumps(stock_data, indent=2, default=str)}
 
-Respond with a trading setup in the following format if a high-confidence setup is found:
+Respond with a trading setup in the following format ONLY if you find a high-confidence setup with:
+- Clear support/resistance levels
+- At least 2:1 reward/risk ratio
+- Strong technical confirmation
+- Clear stop loss level
+- Limited downside risk
 
+Format:
 Symbol: [symbol]
 Entry: $[entry price]
 Target: $[price target]
 Stop: $[stop loss]
-Size: [position size]
+Size: [position size - use 0.5% to 2% of account]
 Confidence: [numeric confidence percentage]
 Risk/Reward: [risk/reward ratio]
 Reason: [detailed explanation]
@@ -162,13 +232,13 @@ If no valid setup is found, respond only with: NO SETUP FOUND"""
                     if value in ['HOLD', 'EXIT', 'PARTIAL_EXIT', 'ADJUST_STOPS']:
                         action_dict['action'] = value
                 elif key == 'PARAMS':
-                    # Validate stop adjustment parameters
                     if action_dict['action'] == 'ADJUST_STOPS':
                         try:
                             if '=' in value:
                                 stop_value = float(value.split('=')[1].strip())
                             else:
                                 stop_value = float(value.strip())
+                            # Ensure new stop is valid
                             action_dict['params'] = str(stop_value)
                         except ValueError:
                             self.logger.error(f"Invalid stop price parameter: {value}")
@@ -198,7 +268,7 @@ If no valid setup is found, respond only with: NO SETUP FOUND"""
                         prompt=prompt,
                         options={
                             'temperature': 0.2,
-                            'num_predict': 200
+                            'num_predict': 300
                         }
                     )
                     return response.get('response', '').strip()
