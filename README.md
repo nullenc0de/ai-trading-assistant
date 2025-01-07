@@ -145,10 +145,7 @@ This project is licensed under the Commercial License - see the [LICENSE](LICENS
 
 ### Commercial Use
 
-This software is protected by copyright and cannot be used for commercial purposes without explicit permission. To obtain a commercial license, please contact:
-
-Email: [your-email@example.com]
-Website: [your-website.com]
+This software is protected by copyright and cannot be used for commercial purposes without explicit permission.
 
 ### Permitted Use
 
