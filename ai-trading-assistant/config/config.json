@@ -1,122 +1,57 @@
 {
     "version": "2.1",
-    "last_updated": "2025-01-08T13:00:00",
+    "last_updated": "2025-01-08T14:00:00",
     
     "account": {
-        // Basic account configuration
         "starting_balance": 3000.00,
         "risk_management": {
-            "cash_reserve_percent": 15.0,          // Keep 15% in cash as safety buffer
+            "cash_reserve_percent": 15.0,
             "position_sizing": {
-                "risk_per_trade_percent": 2.0,     // Risk 2% of account per trade
-                "min_position_percent": 10.0,      // Minimum position size as % of account
-                "max_position_percent": 30.0,      // Maximum position size as % of account
-                "preferred_share_increment": 10     // Round share counts to multiples of 10
+                "risk_per_trade_percent": 2.0,
+                "min_position_percent": 10.0,
+                "max_position_percent": 30.0,
+                "preferred_share_increment": 10
             },
             "limits": {
-                "max_daily_loss_percent": 5.0,     // Stop trading if down 5% in a day
-                "max_positions": 3,                // Maximum concurrent positions
-                "max_sector_percent": 40.0         // Maximum exposure to one sector
+                "max_daily_loss_percent": 5.0,
+                "max_positions": 3,
+                "max_sector_percent": 40.0
             }
         }
     },
 
     "trading": {
         "filters": {
-            // Stock screening criteria
-            "min_price": 5.00,                    // Minimum stock price
-            "max_price": 100.00,                  // Maximum stock price
-            "min_volume": 500000,                 // Minimum daily volume
-            "min_rel_volume": 2.0,                // Minimum relative volume
-            "max_spread_percent": 0.02,           // Maximum bid-ask spread
-            "min_atr": 0.20,                      // Minimum ATR for volatility
-            "exclude_sectors": [                  // Sectors to avoid
-                "Cryptocurrencies",
-                "Shell Companies",
-                "Penny Stocks"
-            ],
-            "exclude_exchanges": [                // Exchanges to avoid
-                "OTC",
-                "PINK"
-            ]
+            "min_price": 5.00,
+            "max_price": 100.00,
+            "min_volume": 500000,
+            "min_rel_volume": 2.0,
+            "max_spread_percent": 0.02
         },
-        
         "rules": {
             "entry": {
-                // Entry criteria
-                "min_setup_confidence": 85,        // Minimum setup confidence score
-                "min_reward_risk_ratio": 3.0,      // Minimum reward:risk ratio
+                "min_setup_confidence": 85,
+                "min_reward_risk_ratio": 3.0,
                 "require_volume_confirmation": true,
-                "require_trend_alignment": true,
-                "min_distance_from_vwap": 0.02     // Minimum distance from VWAP
+                "min_distance_from_vwap": 0.02
             },
-            
             "exit": {
-                // Exit and profit taking rules
                 "use_trailing_stops": true,
                 "time_based_exit": true,
-                "max_hold_time_hours": 48,         // Maximum position hold time
-                "max_adverse_excursion": 0.02,     // Maximum drawdown before exit
-                "profit_taking": {
-                    "enable_partial_exits": true,
-                    "min_profit_target_percent": 3.0,  // Minimum profit target
-                    "first_target_multiplier": 2.0,    // First profit target multiple
-                    "final_target_multiplier": 4.0     // Final profit target multiple
-                },
-                "scale_out_levels": [
-                    {"percent_gain": 3.0, "exit_size": 0.3},  // Exit 30% at 3% gain
-                    {"percent_gain": 4.0, "exit_size": 0.3},  // Exit 30% at 4% gain
-                    {"percent_gain": 5.0, "exit_size": 0.4}   // Exit 40% at 5% gain
-                ]
+                "max_hold_time_hours": 48,
+                "max_adverse_excursion": 0.02
             }
         }
     },
 
     "system": {
-        // System operation parameters
-        "scan_interval": 60,                      // Scan interval in seconds
-        "max_symbols": 100,                       // Maximum symbols to track
+        "scan_interval": 60,
+        "max_symbols": 100,
         "parallel_analysis": true,
-        "analysis_timeout": 30,
-        "cache_duration": 300,
-        "debug_mode": false,
-        "log_level": "INFO",
-        "performance_tracking": {
-            "log_dir": "logs/performance",
-            "metrics_update_interval": 60,
-            "save_charts": true
-        }
-    },
-
-    "fees": {
-        // Trading fee configuration
-        "commission_per_trade": 0.0,              // Commission per trade (if any)
-        "sec_fee": 0.0000051,                    // SEC fee rate
-        "finra_fee": 0.000119,                   // FINRA fee rate
-        "minimum_fee": 0.02,                      // Minimum fee per trade
-        "consider_fees_in_targets": true          // Adjust targets for fees
-    },
-
-    "recovery_mode": {
-        // Recovery mode settings for drawdowns
-        "enable_recovery_mode": true,
-        "activation_threshold_percent": -5.0,     // Activate at 5% drawdown
-        "position_size_reduction": 50,            // Reduce position size by 50%
-        "min_reward_risk_increase": 1.0,         // Increase min R:R ratio
-        "auto_disable_threshold": 0.0             // Disable at breakeven
-    },
-
-    "market_conditions": {
-        // Market condition adjustments
-        "high_volatility": {
-            "increase_position_size": false,
-            "tighten_stops": true,
-            "reduce_hold_time": true
-        },
-        "low_volatility": {
-            "decrease_position_size": true,
-            "widen_stops": false,
-            "extend_hold_time": true
+        "llm": {
+            "model": "llama3",
+            "temperature": 0.2,
+            "max_tokens": 300
         }
     }
 }
