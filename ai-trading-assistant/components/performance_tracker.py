@@ -1,19 +1,15 @@
-"""
-performance_tracker.py
----------------------
-Enhanced with immediate updates and proper synchronization
-"""
 import os
 import json
 import pandas as pd
 import numpy as np
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Optional, Any, List
 from threading import Lock
 
 class PerformanceTracker:
     def __init__(self, log_dir='performance_logs'):
+        """Initialize Performance Tracker with enhanced metrics tracking"""
         self.log_dir = log_dir
         self.trades_file = os.path.join(log_dir, 'trades.csv')
         self.metrics_file = os.path.join(log_dir, 'metrics.json')
@@ -23,6 +19,7 @@ class PerformanceTracker:
         self._init_log_files()
 
     def _init_log_files(self) -> None:
+        """Initialize log files with proper structure"""
         try:
             with self._lock:
                 if not os.path.exists(self.trades_file):
@@ -43,6 +40,7 @@ class PerformanceTracker:
             raise
 
     def _create_default_metrics(self) -> Dict[str, Any]:
+        """Create default metrics dictionary"""
         return {
             'total_trades': 0,
             'open_trades': 0,
@@ -64,8 +62,10 @@ class PerformanceTracker:
         }
 
     def log_trade(self, trade_data: Dict[str, Any], force_update: bool = True) -> bool:
+        """Log a new trade with validation and update metrics"""
         try:
             with self._lock:
+                # Read existing trades
                 df = pd.read_csv(self.trades_file)
                 
                 # Validate trade data
@@ -91,6 +91,7 @@ class PerformanceTracker:
             return False
 
     def update_trade(self, symbol: str, updates: Dict[str, Any], force_update: bool = True) -> bool:
+        """Update existing trade with validation"""
         try:
             with self._lock:
                 df = pd.read_csv(self.trades_file)
@@ -128,7 +129,18 @@ class PerformanceTracker:
             self.logger.error(f"Error updating trade: {str(e)}")
             return False
 
+    def get_open_positions(self) -> pd.DataFrame:
+        """Get all open positions with thread safety"""
+        try:
+            with self._lock:
+                df = pd.read_csv(self.trades_file)
+                return df[df['status'] == 'OPEN'].copy()
+        except Exception as e:
+            self.logger.error(f"Error getting open positions: {str(e)}")
+            return pd.DataFrame()  # Return empty DataFrame on error
+
     def _update_metrics(self) -> None:
+        """Update comprehensive performance metrics"""
         try:
             with self._lock:
                 df = pd.read_csv(self.trades_file)
@@ -169,6 +181,21 @@ class PerformanceTracker:
                     total_profit = metrics['total_profit']
                     total_loss = abs(metrics['total_loss'])
                     metrics['profit_factor'] = total_profit / total_loss if total_loss > 0 else float('inf')
+                else:
+                    # Initialize metrics for no closed trades
+                    metrics.update({
+                        'winning_trades': 0,
+                        'losing_trades': 0,
+                        'win_rate': 0.0,
+                        'avg_profit_loss': 0.0,
+                        'largest_win': 0.0,
+                        'largest_loss': 0.0,
+                        'average_win': 0.0,
+                        'average_loss': 0.0,
+                        'total_profit': 0.0,
+                        'total_loss': 0.0,
+                        'profit_factor': 0.0
+                    })
                 
                 # Open positions
                 open_trades = df[df['status'] == 'OPEN']
@@ -198,6 +225,7 @@ class PerformanceTracker:
             self.logger.error(f"Error updating metrics: {str(e)}")
 
     def _save_metrics(self, metrics: Dict[str, Any]) -> None:
+        """Save metrics to file with thread safety"""
         try:
             with self._lock:
                 with open(self.metrics_file, 'w') as f:
@@ -206,6 +234,7 @@ class PerformanceTracker:
             self.logger.error(f"Error saving metrics: {str(e)}")
 
     def get_metrics(self) -> Dict[str, Any]:
+        """Get current performance metrics"""
         try:
             with self._lock:
                 with open(self.metrics_file, 'r') as f:
@@ -215,46 +244,6 @@ class PerformanceTracker:
             return self._create_default_metrics()
 
     def _validate_trade_data(self, trade_data: Dict[str, Any]) -> bool:
+        """Validate required fields in trade data"""
         required_fields = ['symbol', 'entry_price', 'position_size']
         return all(field in trade_data for field in required_fields)
-
-"""
-position_manager.py updates
--------------------------
-Enhanced with immediate performance tracking updates
-"""
-
-class PositionManager:
-    async def _handle_exit(self, symbol: str, current_price: float, 
-                          position_data: Dict[str, Any], action: Dict[str, Any]) -> None:
-        try:
-            entry_price = float(position_data['entry_price'])
-            position_size = float(position_data['size'])
-            
-            # Calculate P&L
-            profit_loss = (current_price - entry_price) * position_size
-            profit_loss_percent = ((current_price / entry_price) - 1) * 100
-            
-            exit_data = {
-                'status': 'CLOSED',
-                'exit_price': current_price,
-                'exit_time': datetime.now().isoformat(),
-                'profit_loss': profit_loss,
-                'profit_loss_percent': profit_loss_percent,
-                'notes': f"Exit reason: {action.get('reason', 'No reason provided')}"
-            }
-            
-            # Force immediate update of both trade and metrics
-            if self.performance_tracker.update_trade(symbol, exit_data, force_update=True):
-                self.logger.info(
-                    f"Closed position in {symbol} at ${current_price:.2f} "
-                    f"(P&L: ${profit_loss:.2f}, {profit_loss_percent:.2f}%)"
-                )
-                
-                if symbol in self.open_positions:
-                    self._record_closed_position(symbol, exit_data)
-            else:
-                self.logger.error(f"Failed to close position in {symbol}")
-                
-        except Exception as e:
-            self.logger.error(f"Exit handling error for {symbol}: {str(e)}")
