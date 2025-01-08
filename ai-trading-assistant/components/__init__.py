@@ -1,7 +1,4 @@
-# components/__init__.py
-"""
-Trading System Components
-"""
+"""Trading System Components"""
 
 from .config_manager import ConfigManager
 from .market_monitor import MarketMonitor
