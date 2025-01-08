@@ -1,0 +1,21 @@
+{
+    "total_trades": 0,
+    "open_trades": 0,
+    "closed_trades": 0,
+    "winning_trades": 0,
+    "losing_trades": 0,
+    "win_rate": 0.0,
+    "avg_profit_loss": 0.0,
+    "largest_win": 0.0,
+    "largest_loss": 0.0,
+    "average_win": 0.0,
+    "average_loss": 0.0,
+    "total_profit": 0.0,
+    "total_loss": 0.0,
+    "max_drawdown": 0.0,
+    "profit_factor": 0.0,
+    "open_positions_count": 0,
+    "open_positions": [],
+    "open_exposure": 0.0,
+    "last_updated": "2025-01-08T18:30:47.389000"
+}
