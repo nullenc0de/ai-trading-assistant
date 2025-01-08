@@ -1,0 +1,57 @@
+{
+    "version": "2.1",
+    "last_updated": "2025-01-08T14:00:00",
+    
+    "account": {
+        "starting_balance": 3000.00,
+        "risk_management": {
+            "cash_reserve_percent": 15.0,
+            "position_sizing": {
+                "risk_per_trade_percent": 2.0,
+                "min_position_percent": 10.0,
+                "max_position_percent": 30.0,
+                "preferred_share_increment": 10
+            },
+            "limits": {
+                "max_daily_loss_percent": 5.0,
+                "max_positions": 3,
+                "max_sector_percent": 40.0
+            }
+        }
+    },
+
+    "trading": {
+        "filters": {
+            "min_price": 5.00,
+            "max_price": 100.00,
+            "min_volume": 500000,
+            "min_rel_volume": 2.0,
+            "max_spread_percent": 0.02
+        },
+        "rules": {
+            "entry": {
+                "min_setup_confidence": 85,
+                "min_reward_risk_ratio": 3.0,
+                "require_volume_confirmation": true,
+                "min_distance_from_vwap": 0.02
+            },
+            "exit": {
+                "use_trailing_stops": true,
+                "time_based_exit": true,
+                "max_hold_time_hours": 48,
+                "max_adverse_excursion": 0.02
+            }
+        }
+    },
+
+    "system": {
+        "scan_interval": 60,
+        "max_symbols": 100,
+        "parallel_analysis": true,
+        "llm": {
+            "model": "llama3",
+            "temperature": 0.2,
+            "max_tokens": 300
+        }
+    }
+}
