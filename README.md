@@ -55,12 +55,6 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-4. Configure the system:
-```bash
-cp config/config.json.example config/config.json
-# Edit config.json with your preferred settings
-```
-
 ## Usage
 
 ### Starting the System
