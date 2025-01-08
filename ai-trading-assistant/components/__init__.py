@@ -8,6 +8,8 @@ from .robinhood_authenticator import RobinhoodAuthenticator
 from .stock_analyzer import StockAnalyzer
 from .stock_scanner import StockScanner
 from .trading_analyst import TradingAnalyst
+from .account_manager import AccountManager
+from .position_manager import PositionManager
 
 __all__ = [
     'ConfigManager',
@@ -17,5 +19,7 @@ __all__ = [
     'RobinhoodAuthenticator',
     'StockAnalyzer',
     'StockScanner',
-    'TradingAnalyst'
+    'TradingAnalyst',
+    'AccountManager',
+    'PositionManager'
 ]
