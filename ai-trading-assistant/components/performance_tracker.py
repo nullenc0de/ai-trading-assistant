@@ -49,12 +49,14 @@ class PerformanceTracker:
             'losing_trades': 0,
             'win_rate': 0.0,
             'avg_profit_loss': 0.0,
-            'max_drawdown': 0.0,
-            'profit_factor': 0.0,
             'largest_win': 0.0,
             'largest_loss': 0.0,
             'average_win': 0.0,
             'average_loss': 0.0,
+            'total_profit': 0.0,
+            'total_loss': 0.0,
+            'max_drawdown': 0.0,
+            'profit_factor': 0.0,
             'open_positions_count': 0,
             'open_positions': [],
             'open_exposure': 0.0,
@@ -65,7 +67,6 @@ class PerformanceTracker:
         """Log a new trade with validation and update metrics"""
         try:
             with self._lock:
-                # Read existing trades
                 df = pd.read_csv(self.trades_file)
                 
                 # Validate trade data
@@ -89,6 +90,16 @@ class PerformanceTracker:
         except Exception as e:
             self.logger.error(f"Error logging trade: {str(e)}")
             return False
+
+    def get_open_positions(self) -> pd.DataFrame:
+        """Get all open positions with thread safety"""
+        try:
+            with self._lock:
+                df = pd.read_csv(self.trades_file)
+                return df[df['status'] == 'OPEN'].copy()
+        except Exception as e:
+            self.logger.error(f"Error getting open positions: {str(e)}")
+            return pd.DataFrame()
 
     def update_trade(self, symbol: str, updates: Dict[str, Any], force_update: bool = True) -> bool:
         """Update existing trade with validation"""
@@ -129,22 +140,11 @@ class PerformanceTracker:
             self.logger.error(f"Error updating trade: {str(e)}")
             return False
 
-    def get_open_positions(self) -> pd.DataFrame:
-        """Get all open positions with thread safety"""
-        try:
-            with self._lock:
-                df = pd.read_csv(self.trades_file)
-                return df[df['status'] == 'OPEN'].copy()
-        except Exception as e:
-            self.logger.error(f"Error getting open positions: {str(e)}")
-            return pd.DataFrame()  # Return empty DataFrame on error
-
     def _update_metrics(self) -> None:
         """Update comprehensive performance metrics"""
         try:
             with self._lock:
                 df = pd.read_csv(self.trades_file)
-                
                 metrics = {}
                 
                 # Basic counts
@@ -161,7 +161,7 @@ class PerformanceTracker:
                     metrics.update({
                         'winning_trades': len(winners),
                         'losing_trades': len(losers),
-                        'win_rate': (len(winners) / len(closed_trades) * 100),
+                        'win_rate': (len(winners) / len(closed_trades) * 100) if len(closed_trades) > 0 else 0.0,
                         'avg_profit_loss': closed_trades['profit_loss'].mean(),
                         'largest_win': winners['profit_loss'].max() if not winners.empty else 0.0,
                         'largest_loss': losers['profit_loss'].min() if not losers.empty else 0.0,
