@@ -15,7 +15,10 @@ class PerformanceTracker:
         self.logger = logging.getLogger(__name__)
         self._lock = Lock()  # Add thread safety
         os.makedirs(log_dir, exist_ok=True)
+        
+        self.logger.info("Initializing performance log files...")
         self._init_log_files()
+        self.logger.info("Performance tracker initialized.")
 
     def _init_log_files(self) -> None:
         """Initialize log files with proper structure"""
@@ -30,6 +33,7 @@ class PerformanceTracker:
                         'profit_loss', 'profit_loss_percent', 'exit_time',
                         'reason', 'notes'
                     ]
+                    self.logger.debug("trades.csv initialized")
                     pd.DataFrame(columns=columns).to_csv(self.trades_file, index=False)
                 
                 # Initialize metrics.json with default structure if it doesn't exist
@@ -37,6 +41,7 @@ class PerformanceTracker:
                 try:
                     if os.path.exists(self.metrics_file):
                         with open(self.metrics_file, 'r') as f:
+                            self.logger.debug("metrics.json loaded successfully")
                             json.load(f)  # Test if valid JSON
                     else:
                         self._save_metrics(self._create_default_metrics())
