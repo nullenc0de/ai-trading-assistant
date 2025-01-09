@@ -35,25 +35,46 @@ class TradingSystem:
         
         # Initialize components 
         self._setup_logging()
+       
+        logging.info("Initializing system components...")
         self._init_components()
+        logging.info("System components initialized.")
+
 
         # Store active trades
         self.active_trades = {}
         
     def _init_components(self):
         """Initialize system components"""
+                
+        logging.info("Initializing config manager...")
         self.config_manager = ConfigManager()
+        logging.info("Config manager initialized.")
+
         
         self.market_monitor = MarketMonitor(
             timezone=self.config_manager.get('trading.market_timezone', 'US/Eastern')
         )
+        logging.info("Market monitor initialized.")
+        
+        logging.info("Initializing output formatter...")  
         self.output_formatter = OutputFormatter()
+        logging.info("Output formatter initialized.")
+
         self.performance_tracker = PerformanceTracker(
             log_dir=self.config_manager.get('system.performance_tracking.log_dir', 'performance_logs')
         )
-
+        logging.info("Performance tracker initialized.")
+        
+        logging.info("Initializing Alpaca authenticator...")
         alpaca_auth = AlpacaAuthenticator()
-        robinhood_auth = RobinhoodAuthenticator()
+        logging.info("Alpaca authenticator initialized.")
+
+        
+        logging.info("Initializing Robinhood authenticator...")
+        robinhood_auth = RobinhoodAuthenticator()  
+        logging.info("Robinhood authenticator initialized.")
+
         
         if self.config_manager.get('trading.broker.preferred') == 'robinhood':
             robinhood_client = robinhood_auth.create_client()
@@ -66,11 +87,21 @@ class TradingSystem:
                 self.config_manager, alpaca_client=alpaca_client
             )
             
+
+        logging.info("Broker manager initialized.")
+        
+        logging.info("Initializing stock scanner...")  
         self.scanner = StockScanner()
+        logging.info("Stock scanner initialized.")
+
         self.analyzer = StockAnalyzer(
             config=self.config_manager.get_section('trading.filters')
         )
-        self.analyst = TradingAnalyst(
+        logging.info("Stock analyzer initialized.")
+        
+        logging.info("Initializing trading analyst...")
+        self.analyst = TradingAnalyst(  
+
             self.performance_tracker, 
             self.broker_manager,
             model=self.config_manager.get('system.llm.model', 'llama3')
