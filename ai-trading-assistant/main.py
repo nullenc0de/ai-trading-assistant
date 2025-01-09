@@ -1,17 +1,17 @@
 """
 Trading System Main Module
 ------------------------
-Main entry point for the trading system with improved broker handling
+Main entry point for the trading system with improved broker handling 
 and complete trading functionality.
 
 Author: AI Trading Assistant
-Version: 2.2
+Version: 2.2  
 Last Updated: 2025-01-09
 """
 
 import asyncio
 import logging
-import os
+import os 
 import pandas as pd
 from datetime import datetime
 from typing import Optional, Dict, Any, List
@@ -28,17 +28,53 @@ class TradingSystem:
         self.metrics = {
             'trades_analyzed': 0,
             'setups_detected': 0,
-            'trades_executed': 0,
+            'trades_executed': 0, 
             'successful_trades': 0,
             'daily_watchlist': []
         }
         
-        # Initialize components
+        # Initialize components 
         self._setup_logging()
         self._init_components()
 
         # Store active trades
         self.active_trades = {}
+        
+    def _init_components(self):
+        """Initialize system components"""
+        self.config_manager = ConfigManager()
+        
+        self.market_monitor = MarketMonitor(
+            timezone=self.config_manager.get('trading.market_timezone', 'US/Eastern')
+        )
+        self.output_formatter = OutputFormatter()
+        self.performance_tracker = PerformanceTracker(
+            log_dir=self.config_manager.get('system.performance_tracking.log_dir', 'performance_logs')
+        )
+
+        alpaca_auth = AlpacaAuthenticator()
+        robinhood_auth = RobinhoodAuthenticator()
+        
+        if self.config_manager.get('trading.broker.preferred') == 'robinhood':
+            robinhood_client = robinhood_auth.create_client()
+            self.broker_manager = BrokerManager(
+                self.config_manager, robinhood_client=robinhood_client
+            )
+        else:
+            alpaca_client = alpaca_auth.create_trading_client()
+            self.broker_manager = BrokerManager(
+                self.config_manager, alpaca_client=alpaca_client
+            )
+            
+        self.scanner = StockScanner()
+        self.analyzer = StockAnalyzer(
+            config=self.config_manager.get_section('trading.filters')
+        )
+        self.analyst = TradingAnalyst(
+            self.performance_tracker, 
+            self.broker_manager,
+            model=self.config_manager.get('system.llm.model', 'llama3')
+        )
 
     def _setup_logging(self):
         """Setup logging configuration"""
@@ -50,13 +86,13 @@ class TradingSystem:
         file_handler.setFormatter(logging.Formatter('%(asctime)s - [%(levelname)s] - %(name)s - %(message)s'))
         handlers.append(file_handler)
         
-        debug_handler = logging.FileHandler('logs/trading_system_debug.log')
+        debug_handler = logging.FileHandler('logs/trading_system_debug.log') 
         debug_handler.setLevel(logging.DEBUG)
         debug_handler.setFormatter(logging.Formatter('%(asctime)s - [%(levelname)s] - %(name)s - %(message)s'))
         handlers.append(debug_handler)
         
         console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
+        console_handler.setLevel(logging.INFO) 
         console_handler.setFormatter(logging.Formatter('%(asctime)s - [%(levelname)s] - %(message)s'))
         handlers.append(console_handler)
         
@@ -68,9 +104,7 @@ class TradingSystem:
         
         for handler in handlers:
             root_logger.addHandler(handler)
-
-    # ... (rest of the methods remain the same until _generate_eod_report)
-
+            
     async def _generate_eod_report(self):
         """Generate end-of-day analysis and performance report"""
         try:
@@ -292,7 +326,7 @@ class TradingSystem:
                 await asyncio.sleep(60)
 
 def main():
-    """Main entry point"""
+    """Main entry point""" 
     try:
         logging.info("Starting trading system...")
         trading_system = TradingSystem()
