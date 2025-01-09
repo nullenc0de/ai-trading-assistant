@@ -2,25 +2,13 @@
     "version": "2.1",
     "last_updated": "2025-01-08T14:00:00",
     
-    "account": {
-        "starting_balance": 3000.00,
-        "risk_management": {
-            "cash_reserve_percent": 15.0,
-            "position_sizing": {
-                "risk_per_trade_percent": 2.0,
-                "min_position_percent": 10.0,
-                "max_position_percent": 30.0,
-                "preferred_share_increment": 10
-            },
-            "limits": {
-                "max_daily_loss_percent": 5.0,
-                "max_positions": 3,
-                "max_sector_percent": 40.0
-            }
-        }
-    },
-
     "trading": {
+        "broker": {
+            "preferred": "paper",
+            "paper_trading": true,
+            "max_retries": 3,
+            "connect_timeout": 30
+        },
         "filters": {
             "min_price": 5.00,
             "max_price": 100.00,
@@ -40,6 +28,24 @@
                 "time_based_exit": true,
                 "max_hold_time_hours": 48,
                 "max_adverse_excursion": 0.02
+            }
+        }
+    },
+
+    "account": {
+        "starting_balance": 3000.00,
+        "risk_management": {
+            "cash_reserve_percent": 15.0,
+            "position_sizing": {
+                "risk_per_trade_percent": 2.0,
+                "min_position_percent": 10.0,
+                "max_position_percent": 30.0,
+                "preferred_share_increment": 10
+            },
+            "limits": {
+                "max_daily_loss_percent": 5.0,
+                "max_positions": 3,
+                "max_sector_percent": 40.0
             }
         }
     },
