@@ -29,197 +29,6 @@ class TradingSystem:
             'trades_analyzed': 0,
             'setups_detected': 0,
             'trades_executed': 0,
-                'successful_trades': 0,
-                'daily_watchlist': []
-            })
-            
-            # Clear caches with error handling
-            try:
-                self.analyzer.clear_cache()
-            except Exception as e:
-                logging.warning(f"Error clearing analyzer cache: {str(e)}")
-                
-            try:
-                self.scanner.clear_cache()
-            except Exception as e:
-                logging.warning(f"Error clearing scanner cache: {str(e)}")
-            
-        except Exception as e:
-            logging.error(f"Error generating EOD report: {str(e)}")
-            return
-
-    async def _handle_premarket(self):
-        """Handle pre-market analysis"""
-        try:
-            logging.info("Pre-market session. Running pre-market scan...")
-            symbols = await self.scanner.get_symbols(max_symbols=50)
-            await self._analyze_premarket_movers(symbols)
-            await asyncio.sleep(300)  # 5-minute delay between pre-market scans
-            
-        except Exception as e:
-            logging.error(f"Pre-market handling error: {str(e)}")
-
-    async def _handle_postmarket(self):
-        """Handle post-market wrap-up"""
-        try:
-            logging.info("Post-market session. Generating end-of-day report...")
-            await self._generate_eod_report()
-            await asyncio.sleep(300)
-            
-        except Exception as e:
-            logging.error(f"Post-market handling error: {str(e)}")
-
-    async def _handle_regular_trading(self):
-        """Handle regular trading hours"""
-        try:
-            symbols = await self.scanner.get_symbols(
-                max_symbols=self.config_manager.get('system.max_symbols', 100)
-            )
-            
-            # Add watchlist symbols
-            watchlist_symbols = [s for s in self.metrics['daily_watchlist'] if s not in symbols]
-            symbols.extend(watchlist_symbols)
-            
-            # Add open position symbols
-            open_positions = self.performance_tracker.get_open_positions()
-            active_symbols = open_positions['symbol'].tolist()
-            symbols.extend([s for s in active_symbols if s not in symbols])
-            
-            logging.info(f"Analyzing {len(symbols)} symbols "
-                       f"({len(active_symbols)} active, {len(watchlist_symbols)} watchlist)")
-            
-            if symbols:
-                tasks = [self.analyze_symbol(symbol) for symbol in symbols]
-                await asyncio.gather(*tasks)
-            
-            scan_interval = self.config_manager.get('system.scan_interval', 60)
-            await asyncio.sleep(scan_interval)
-            
-        except Exception as e:
-            logging.error(f"Regular trading handling error: {str(e)}")
-
-    async def _execute_trade(self, symbol: str, setup_details: Dict[str, Any]):
-        """Execute a trade based on the trading setup"""
-        try:
-            # Prepare trade parameters
-            trade_params = {
-                'symbol': symbol,
-                'quantity': setup_details.get('size', 100),
-                'order_type': setup_details.get('order_type', 'market'),
-                'entry_price': setup_details.get('entry', None),
-                'stop_loss': setup_details.get('stop', None),
-                'take_profit': setup_details.get('target', None)
-            }
-            
-            # Use broker manager to execute trade
-            execution_result = await self.broker_manager.place_trade(trade_params)
-            
-            if execution_result.get('status') == 'success':
-                logging.info(f"Trade executed for {symbol}: {trade_params}")
-                self.metrics['successful_trades'] += 1
-            else:
-                logging.warning(f"Trade execution failed for {symbol}: {execution_result.get('reason', 'Unknown error')}")
-            
-        except Exception as e:
-            logging.error(f"Trade execution error for {symbol}: {str(e)}")
-
-    def _parse_trading_setup(self, setup: str) -> Optional[Dict[str, Any]]:
-        """Parse the trading setup string into a dictionary"""
-        try:
-            setup_dict = {}
-            lines = setup.strip().split("\n")
-            
-            for line in lines:
-                if ':' in line:
-                    key, value = line.split(':', 1)
-                    key = key.strip().lower()
-                    value = value.strip()
-                    
-                    # Handle different field types
-                    if 'price' in key or 'stop' in key or 'target' in key:
-                        try:
-                            value = float(value.replace(", ", "").strip())
-                        except ValueError:
-                            logging.warning(f"Invalid price format: {value}")
-                            continue
-                            
-                    elif 'confidence' in key:
-                        try:
-                            value = float(value.rstrip('%'))
-                        except ValueError:
-                            logging.warning(f"Invalid confidence format: {value}")
-                            continue
-                    
-                    setup_dict[key] = value
-            
-            return setup_dict if setup_dict else None
-            
-        except Exception as e:
-            logging.error(f"Error parsing trading setup: {str(e)}")
-            return None
-
-    async def _handle_closed_market(self, market_status: Dict[str, Any]):
-        """Handle closed market state"""
-        current_time = datetime.now(self.market_monitor.timezone).strftime('%H:%M:%S %Z')
-        time_until_open = self.market_monitor.time_until_market_open()
-        
-        if market_status['is_weekend']:
-            logging.info(f"Market closed for weekend. Current time: {current_time}")
-        elif market_status['today_is_holiday']:
-            logging.info(f"Market closed for holiday. Current time: {current_time}")
-        else:
-            hours_until = time_until_open.total_seconds() / 3600
-            logging.info(f"Market closed. Current time: {current_time}. "
-                      f"Next session begins in {hours_until:.1f} hours")
-        
-        await asyncio.sleep(300)  # Check every 5 minutes
-
-    async def run(self):
-        """Main trading system loop"""
-        while True:
-            try:
-                # Check market status
-                market_phase = self.market_monitor.get_market_phase()
-                market_status = self.market_monitor.get_market_status()
-                
-                if market_phase == 'closed':
-                    await self._handle_closed_market(market_status)
-                elif market_phase == 'pre-market':
-                    await self._handle_premarket()
-                elif market_phase == 'post-market':
-                    await self._handle_postmarket()
-                else:  # Regular trading hours
-                    await self._handle_regular_trading()
-                
-            except Exception as e:
-                logging.error(f"Main loop error: {str(e)}")
-                await asyncio.sleep(60)
-
-def main():
-    """Main entry point"""
-    try:
-        logging.info("Starting trading system...")
-        trading_system = TradingSystem()
-        
-        loop = asyncio.get_event_loop()
-        try:
-            loop.run_until_complete(trading_system.run())
-        except KeyboardInterrupt:
-            logging.info("Shutting down trading system...")
-        finally:
-            loop.close()
-            
-    except KeyboardInterrupt:
-        print("\nTrading system stopped by user.")
-        logging.info("User initiated shutdown")
-    except Exception as e:
-        logging.critical(f"Fatal error: {str(e)}")
-        raise
-    finally:
-        logging.info("Trading system shutdown complete")
-
-if __name__ == "__main__":
-    main(),
             'successful_trades': 0,
             'daily_watchlist': []
         }
@@ -269,7 +78,7 @@ if __name__ == "__main__":
             self.robinhood_auth = RobinhoodAuthenticator()
             self.alpaca_auth = AlpacaAuthenticator()
             
-            # Select broker type and initialize client
+            # Select broker type and initialize client 
             broker_type = self._select_broker()
             alpaca_client = None
             robinhood_client = None
@@ -278,14 +87,14 @@ if __name__ == "__main__":
                 alpaca_client = self.alpaca_auth.create_trading_client()
                 if alpaca_client:
                     account = alpaca_client.get_account()
-                    logging.info(f"Connected to Alpaca paper trading account")
+                    logging.info(f"Connected to Alpaca paper trading account")  
                     logging.info(f"Account Status: {account.status}")
                     logging.info(f"Cash Balance: ${float(account.cash):,.2f}")
                 else:
                     logging.error("Failed to create Alpaca client")
                     broker_type = BrokerType.PAPER
             
-            # Initialize other components
+            # Initialize other components 
             self.scanner = StockScanner()
             self.market_monitor = MarketMonitor()
             self.output_formatter = OutputFormatter()
@@ -293,7 +102,7 @@ if __name__ == "__main__":
             
             # Initialize broker manager with appropriate client
             self.broker_manager = BrokerManager(
-                config_manager=self.config_manager,
+                config_manager=self.config_manager, 
                 robinhood_client=robinhood_client,
                 alpaca_client=alpaca_client
             )
@@ -350,7 +159,7 @@ if __name__ == "__main__":
                     logging.info("Successfully loaded Alpaca credentials")
                     return BrokerType.ALPACA
                     
-                # If no valid credentials, prompt for configuration
+                # If no valid credentials, prompt for configuration 
                 logging.info("Alpaca credentials not found or invalid. Prompting for configuration...")
                 if self._configure_alpaca():
                     if self.alpaca_auth.create_trading_client():
@@ -381,7 +190,7 @@ if __name__ == "__main__":
                 return
 
             technical_data = stock_data.get('technical_indicators', {})
-            logging.info(f"Technical data for {symbol}:")
+            logging.info(f"Technical data for {symbol}:")  
             logging.info(f"  Price: ${stock_data.get('current_price', 0):.2f}")
             logging.info(f"  RSI: {technical_data.get('rsi', 'N/A')}")
             logging.info(f"  VWAP: ${technical_data.get('vwap', 'N/A')}")
@@ -394,7 +203,7 @@ if __name__ == "__main__":
                 await self.trading_analyst.analyze_position(
                     stock_data=stock_data,
                     position_data={
-                        'entry_price': position['entry_price'],
+                        'entry_price': position['entry_price'], 
                         'current_price': stock_data['current_price'],
                         'target_price': position['target_price'],
                         'stop_price': position['stop_price'],
@@ -420,11 +229,11 @@ if __name__ == "__main__":
                     formatted_setup = self.output_formatter.format_trading_setup(trading_setup)
                     print(formatted_setup)
                     
-                    # Prepare trade data
+                    # Prepare trade data  
                     trade_data = {
                         'symbol': setup_details.get('symbol', symbol),
                         'entry_price': setup_details.get('entry', setup_details.get('entry_price')),
-                        'target_price': setup_details.get('target', setup_details.get('target_price')),
+                        'target_price': setup_details.get('target', setup_details.get('target_price')), 
                         'stop_price': setup_details.get('stop', setup_details.get('stop_price')),
                         'size': setup_details.get('size', 100),
                         'confidence': setup_details.get('confidence'),
@@ -455,7 +264,7 @@ if __name__ == "__main__":
                 prev_close = stock_data.get('previous_close', current_price)
                 change_pct = ((current_price - prev_close) / prev_close) * 100
                 volume = stock_data.get('volume_analysis', {}).get('current_volume', 0)
-                avg_volume = stock_data.get('volume_analysis', {}).get('avg_volume', 1)
+                avg_volume = stock_data.get('volume_analysis', {}).get('avg_volume', 1) 
                 rel_volume = volume / avg_volume if avg_volume > 0 else 0
                 
                 # Track significant pre-market activity
@@ -493,7 +302,7 @@ if __name__ == "__main__":
                 logging.error(f"Error getting performance metrics: {str(e)}")
                 metrics = {}
             
-            # Get broker metrics with error handling
+            # Get broker metrics with error handling  
             try:
                 broker_metrics = self.broker_manager.get_account_metrics()
             except Exception as e:
@@ -503,7 +312,7 @@ if __name__ == "__main__":
             # Format the report with safe gets
             report_lines = [
                 "\n=== End of Day Report ===",
-                f"Date: {datetime.now().strftime('%Y-%m-%d')}",
+                f"Date: {datetime.now().strftime('%Y-%m-%d')}",  
                 f"Broker: {self.broker_manager.broker_type.value}",
                 "\nAccount Summary:",
                 f"Current Balance: ${broker_metrics.get('current_balance', 0.0):.2f}",
@@ -512,17 +321,17 @@ if __name__ == "__main__":
                 
                 "\nToday's Trading Activity:",
                 f"Trades Analyzed: {self.metrics.get('trades_analyzed', 0)}",
-                f"Setups Detected: {self.metrics.get('setups_detected', 0)}",
+                f"Setups Detected: {self.metrics.get('setups_detected', 0)}",  
                 f"Trades Executed: {self.metrics.get('trades_executed', 0)}",
                 
                 "\nOverall Performance:",
                 f"Total Trades: {metrics.get('total_trades', 0)}",
-                f"Win Rate: {metrics.get('win_rate', 0.0):.1f}%",
+                f"Win Rate: {metrics.get('win_rate', 0.0):.1f}%",  
                 f"Average P&L: ${metrics.get('avg_profit_loss', 0.0):.2f}",
                 f"Largest Win: ${metrics.get('largest_win', 0.0):.2f}",
                 f"Largest Loss: ${metrics.get('largest_loss', 0.0):.2f}",
                 
-                "\nRisk Metrics:",
+                "\nRisk Metrics:", 
                 f"Open Positions: {metrics.get('open_trades', 0)}",
                 f"Current Drawdown: {broker_metrics.get('drawdown', 0.0):.1f}%",
                 f"High Water Mark: ${broker_metrics.get('high_water_mark', 0.0):.2f}"
@@ -535,5 +344,195 @@ if __name__ == "__main__":
             # Reset daily metrics
             self.metrics.update({
                 'trades_analyzed': 0,
-                'setups_detected': 0,
-                'trades_executed': 0
+                'setups_detected': 0,  
+                'trades_executed': 0,
+                'successful_trades': 0,
+                'daily_watchlist': []
+            })
+            
+            # Clear caches with error handling
+            try:
+                self.analyzer.clear_cache()
+            except Exception as e:
+                logging.warning(f"Error clearing analyzer cache: {str(e)}")
+                
+            try:    
+                self.scanner.clear_cache()
+            except Exception as e:
+                logging.warning(f"Error clearing scanner cache: {str(e)}")
+            except Exception as e:
+            logging.error(f"Error generating EOD report: {str(e)}")
+            return
+
+    async def _handle_premarket(self):
+        """Handle pre-market analysis"""
+        try:
+            logging.info("Pre-market session. Running pre-market scan...")
+            symbols = await self.scanner.get_symbols(max_symbols=50)
+            await self._analyze_premarket_movers(symbols)
+            await asyncio.sleep(300)  # 5-minute delay between pre-market scans
+
+        except Exception as e:
+            logging.error(f"Pre-market handling error: {str(e)}")
+
+    async def _handle_postmarket(self):
+        """Handle post-market wrap-up"""
+        try:
+            logging.info("Post-market session. Generating end-of-day report...")
+            await self._generate_eod_report()
+            await asyncio.sleep(300)
+
+        except Exception as e:
+            logging.error(f"Post-market handling error: {str(e)}")
+
+    async def _handle_regular_trading(self):
+        """Handle regular trading hours"""
+        try:
+            symbols = await self.scanner.get_symbols(
+                max_symbols=self.config_manager.get('system.max_symbols', 100)
+            )
+
+            # Add watchlist symbols
+            watchlist_symbols = [s for s in self.metrics['daily_watchlist'] if s not in symbols]
+            symbols.extend(watchlist_symbols)
+
+            # Add open position symbols
+            open_positions = self.performance_tracker.get_open_positions()
+            active_symbols = open_positions['symbol'].tolist()
+            symbols.extend([s for s in active_symbols if s not in symbols])
+
+            logging.info(f"Analyzing {len(symbols)} symbols "
+                       f"({len(active_symbols)} active, {len(watchlist_symbols)} watchlist)")
+
+            if symbols:
+                tasks = [self.analyze_symbol(symbol) for symbol in symbols]
+                await asyncio.gather(*tasks)
+
+            scan_interval = self.config_manager.get('system.scan_interval', 60)
+            await asyncio.sleep(scan_interval)
+
+        except Exception as e:
+            logging.error(f"Regular trading handling error: {str(e)}")
+
+    async def _execute_trade(self, symbol: str, setup_details: Dict[str, Any]):
+        """Execute a trade based on the trading setup"""
+        try:
+            # Prepare trade parameters  
+            trade_params = {
+                'symbol': symbol,
+                'quantity': setup_details.get('size', 100),
+                'order_type': setup_details.get('order_type', 'market'),
+                'entry_price': setup_details.get('entry', None),
+                'stop_loss': setup_details.get('stop', None),
+                'take_profit': setup_details.get('target', None)
+            }
+
+            # Use broker manager to execute trade
+            execution_result = await self.broker_manager.place_trade(trade_params)
+
+            if execution_result.get('status') == 'success':
+                logging.info(f"Trade executed for {symbol}: {trade_params}")  
+                self.metrics['successful_trades'] += 1
+            else:
+                logging.warning(f"Trade execution failed for {symbol}: {execution_result.get('reason', 'Unknown error')}")
+
+        except Exception as e:
+            logging.error(f"Trade execution error for {symbol}: {str(e)}")
+
+    def _parse_trading_setup(self, setup: str) -> Optional[Dict[str, Any]]:
+        """Parse the trading setup string into a dictionary"""
+        try:
+            setup_dict = {}
+            lines = setup.strip().split("\n")
+
+            for line in lines:
+                if ':' in line:
+                    key, value = line.split(':', 1)
+                    key = key.strip().lower()
+                    value = value.strip()
+
+                    # Handle different field types
+                    if 'price' in key or 'stop' in key or 'target' in key:
+                        try:
+                            value = float(value.replace(", ", "").strip())
+                        except ValueError:
+                            logging.warning(f"Invalid price format: {value}")
+                            continue
+
+                    elif 'confidence' in key:
+                        try:
+                            value = float(value.rstrip('%'))
+                        except ValueError:
+                            logging.warning(f"Invalid confidence format: {value}")
+                            continue
+
+                    setup_dict[key] = value
+
+            return setup_dict if setup_dict else None
+
+        except Exception as e:
+            logging.error(f"Error parsing trading setup: {str(e)}")
+            return None
+
+    async def _handle_closed_market(self, market_status: Dict[str, Any]):
+        """Handle closed market state"""
+        current_time = datetime.now(self.market_monitor.timezone).strftime('%H:%M:%S %Z')
+        time_until_open = self.market_monitor.time_until_market_open()
+
+        if market_status['is_weekend']:
+            logging.info(f"Market closed for weekend. Current time: {current_time}")
+        elif market_status['today_is_holiday']:
+            logging.info(f"Market closed for holiday. Current time: {current_time}")
+        else:
+            hours_until = time_until_open.total_seconds() / 3600
+            logging.info(f"Market closed. Current time: {current_time}. "
+                      f"Next session begins in {hours_until:.1f} hours")
+
+        await asyncio.sleep(300)  # Check every 5 minutes
+
+    async def run(self):
+        """Main trading system loop"""
+        while True:
+            try:
+                # Check market status
+                market_phase = self.market_monitor.get_market_phase()
+                market_status = self.market_monitor.get_market_status()
+
+                if market_phase == 'closed':
+                    await self._handle_closed_market(market_status)
+                elif market_phase == 'pre-market':
+                    await self._handle_premarket()  
+                elif market_phase == 'post-market':
+                    await self._handle_postmarket()
+                else:  # Regular trading hours
+                    await self._handle_regular_trading()
+
+            except Exception as e:
+                logging.error(f"Main loop error: {str(e)}")
+                await asyncio.sleep(60)
+
+def main():
+    """Main entry point"""
+    try:
+        logging.info("Starting trading system...")
+        trading_system = TradingSystem()
+
+        loop = asyncio.get_event_loop()
+        try:
+            loop.run_until_complete(trading_system.run())
+        except KeyboardInterrupt:
+            logging.info("Shutting down trading system...")
+        finally:
+            loop.close()
+
+    except KeyboardInterrupt:
+        print("\nTrading system stopped by user.")
+        logging.info("User initiated shutdown") 
+    except Exception as e:
+        logging.critical(f"Fatal error: {str(e)}")
+        raise
+    finally:
+        logging.info("Trading system shutdown complete")
+
+if __name__ == "__main__":
+    main()
