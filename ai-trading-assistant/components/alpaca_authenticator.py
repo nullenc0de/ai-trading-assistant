@@ -1,3 +1,13 @@
+"""
+Alpaca Authentication Module
+-------------------------
+Handles Alpaca API authentication, credential management, and client creation.
+
+Author: AI Trading Assistant
+Version: 2.2
+Last Updated: 2025-01-09
+"""
+
 import os
 import json
 import logging
@@ -18,16 +28,22 @@ class AlpacaAuthenticator:
     def save_credentials(self, api_key: str, secret_key: str, paper_trading: bool = True) -> bool:
         """Save Alpaca credentials securely"""
         try:
+            # Create full config structure
             config = {
                 "api_key": api_key,
                 "secret_key": secret_key,
                 "paper_trading": paper_trading,
                 "settings": {
                     "max_retries": 3,
-                    "timeout": 30
+                    "timeout": 30,
+                    "debug_mode": False
                 }
             }
             
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(os.path.abspath(self.config_path)), exist_ok=True)
+            
+            # Save config with pretty formatting
             with open(self.config_path, 'w') as f:
                 json.dump(config, f, indent=4)
             
@@ -45,6 +61,7 @@ class AlpacaAuthenticator:
         """Load Alpaca credentials"""
         try:
             if not os.path.exists(self.config_path):
+                self.logger.info("No credentials file found")
                 return None
             
             with open(self.config_path, 'r') as f:
@@ -52,6 +69,7 @@ class AlpacaAuthenticator:
             
             # Validate required fields
             if not config.get('api_key') or not config.get('secret_key'):
+                self.logger.warning("Incomplete credentials in config")
                 return None
                 
             return config
@@ -65,16 +83,22 @@ class AlpacaAuthenticator:
         try:
             creds = self.load_credentials()
             if not creds:
+                self.logger.info("No credentials available to create trading client")
                 return None
                 
+            self.logger.info("Creating Alpaca trading client")
             client = TradingClient(
                 api_key=creds['api_key'],
                 secret_key=creds['secret_key'],
                 paper=creds.get('paper_trading', True)  # Default to paper trading
             )
             
-            # Test connection
-            client.get_account()
+            # Test connection and log account info
+            account = client.get_account()
+            self.logger.info(f"Connected to Alpaca. Account Status: {account.status}")
+            self.logger.info(f"Account Cash: ${float(account.cash):,.2f}")
+            self.logger.info(f"Account Equity: ${float(account.equity):,.2f}")
+            
             return client
             
         except Exception as e:
@@ -101,7 +125,8 @@ class AlpacaAuthenticator:
         """Validate Alpaca credentials by attempting to create a client"""
         try:
             client = TradingClient(api_key=api_key, secret_key=secret_key, paper=True)
-            client.get_account()  # Test API connection
+            account = client.get_account()
+            self.logger.info(f"Credentials validated successfully. Account ID: {account.id}")
             return True
             
         except Exception as e:
@@ -126,6 +151,7 @@ class AlpacaAuthenticator:
         try:
             if os.path.exists(self.config_path):
                 os.remove(self.config_path)
+                self.logger.info("Credentials removed successfully")
             return True
             
         except Exception as e:
