@@ -4,10 +4,8 @@
     
     "trading": {
         "broker": {
-            "preferred": "paper",
-            "paper_trading": true,
-            "max_retries": 3,
-            "connect_timeout": 30
+            "preferred": "alpaca",
+            "paper_trading": true
         },
         "filters": {
             "min_price": 5.00,
@@ -33,7 +31,7 @@
     },
 
     "account": {
-        "starting_balance": 3000.00,
+        "starting_balance": 100000.00,
         "risk_management": {
             "cash_reserve_percent": 15.0,
             "position_sizing": {
