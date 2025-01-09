@@ -1,13 +1,26 @@
 """
-Alpaca Setup Script
+Alpaca Setup Utility
 ------------------
-Sets up Alpaca credentials securely.
+Sets up and configures Alpaca paper trading credentials.
+
+Author: AI Trading Assistant
+Version: 1.1
+Last Updated: 2025-01-09
 """
 
 import os
+import logging
 from components import AlpacaAuthenticator
 
+def setup_logging():
+    """Setup basic logging configuration"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - [%(levelname)s] - %(message)s'
+    )
+
 def setup_alpaca():
+    """Setup Alpaca credentials interactively"""
     print("\n=== Alpaca Trading Setup ===")
     print("Please enter your Alpaca API credentials:")
     
@@ -32,5 +45,10 @@ def setup_alpaca():
         print("\n❌ Invalid credentials. Please check and try again.")
         return False
 
-if __name__ == "__main__":
+def main():
+    """Main entry point"""
+    setup_logging()
     setup_alpaca()
+
+if __name__ == "__main__":
+    main()
