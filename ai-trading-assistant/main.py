@@ -1,3 +1,14 @@
+"""
+Trading System Main Module
+------------------------
+Main entry point for the trading system with improved broker handling
+and complete trading functionality.
+
+Author: AI Trading Assistant
+Version: 2.2
+Last Updated: 2025-01-09
+"""
+
 import asyncio
 import logging
 import os
@@ -30,6 +41,7 @@ class TradingSystem:
         self.active_trades = {}
 
     def _setup_logging(self):
+        """Setup logging configuration"""
         os.makedirs('logs', exist_ok=True)
         handlers = []
         
@@ -58,6 +70,7 @@ class TradingSystem:
             root_logger.addHandler(handler)
 
     def _init_components(self):
+        """Initialize trading system components"""
         try:
             self.config_manager = ConfigManager('config.json')
             
@@ -76,9 +89,13 @@ class TradingSystem:
                     # Prompt for Alpaca credentials if not available
                     if self._configure_alpaca():
                         alpaca_client = self.alpaca_auth.create_trading_client()
-                    
-                    if not alpaca_client:
-                        logging.warning("Failed to create Alpaca client. Falling back to paper trading.")
+                        if alpaca_client:
+                            logging.info("Successfully created Alpaca trading client")
+                        else:
+                            logging.warning("Failed to create Alpaca client after configuration")
+                            broker_type = BrokerType.PAPER
+                    else:
+                        logging.warning("Failed to configure Alpaca. Falling back to paper trading")
                         broker_type = BrokerType.PAPER
                     
             elif broker_type == BrokerType.ROBINHOOD:
@@ -125,9 +142,12 @@ class TradingSystem:
             print("\nUsing Alpaca Paper Trading for safety.")
             
             if self.alpaca_auth.validate_credentials(api_key, secret_key):
-                self.alpaca_auth.save_credentials(api_key, secret_key, paper_trading)
-                print("✅ Alpaca credentials configured successfully!")
-                return True
+                if self.alpaca_auth.save_credentials(api_key, secret_key, paper_trading):
+                    print("✅ Alpaca credentials configured successfully!")
+                    return True
+                else:
+                    print("❌ Error saving credentials.")
+                    return False
             else:
                 print("❌ Invalid Alpaca credentials. Please check and try again.")
                 return False
@@ -400,7 +420,7 @@ class TradingSystem:
     async def _execute_trade(self, symbol: str, setup_details: Dict[str, Any]):
         """Execute a trade based on the trading setup"""
         try:
-            # Implement broker-specific trade execution logic
+            # Prepare trade parameters
             trade_params = {
                 'symbol': symbol,
                 'quantity': setup_details.get('size', 100),
@@ -457,6 +477,22 @@ class TradingSystem:
             logging.error(f"Error parsing trading setup: {str(e)}")
             return None
 
+    async def _handle_closed_market(self, market_status: Dict[str, Any]):
+        """Handle closed market state"""
+        current_time = datetime.now(self.market_monitor.timezone).strftime('%H:%M:%S %Z')
+        time_until_open = self.market_monitor.time_until_market_open()
+        
+        if market_status['is_weekend']:
+            logging.info(f"Market closed for weekend. Current time: {current_time}")
+        elif market_status['today_is_holiday']:
+            logging.info(f"Market closed for holiday. Current time: {current_time}")
+        else:
+            hours_until = time_until_open.total_seconds() / 3600
+            logging.info(f"Market closed. Current time: {current_time}. "
+                      f"Next session begins in {hours_until:.1f} hours")
+        
+        await asyncio.sleep(300)  # Check every 5 minutes
+
     async def run(self):
         """Main trading system loop"""
         while True:
@@ -466,25 +502,11 @@ class TradingSystem:
                 market_status = self.market_monitor.get_market_status()
                 
                 if market_phase == 'closed':
-                    current_time = datetime.now(self.market_monitor.timezone).strftime('%H:%M:%S %Z')
-                    time_until_open = self.market_monitor.time_until_market_open()
-                    
-                    if market_status['is_weekend']:
-                        logging.info(f"Market closed for weekend. Current time: {current_time}")
-                    elif market_status['today_is_holiday']:
-                        logging.info(f"Market closed for holiday. Current time: {current_time}")
-                    else:
-                        hours_until = time_until_open.total_seconds() / 3600
-                        logging.info(f"Market closed. Current time: {current_time}. Next session begins in {hours_until:.1f} hours")
-                    await asyncio.sleep(300)  # Check every 5 minutes
-                    continue
-                    
+                    await self._handle_closed_market(market_status)
                 elif market_phase == 'pre-market':
                     await self._handle_premarket()
-                    
                 elif market_phase == 'post-market':
                     await self._handle_postmarket()
-                    
                 else:  # Regular trading hours
                     await self._handle_regular_trading()
                 
@@ -492,8 +514,8 @@ class TradingSystem:
                 logging.error(f"Main loop error: {str(e)}")
                 await asyncio.sleep(60)
 
-
 def main():
+    """Main entry point"""
     try:
         logging.info("Starting trading system...")
         trading_system = TradingSystem()
@@ -514,7 +536,6 @@ def main():
         raise
     finally:
         logging.info("Trading system shutdown complete")
-
 
 if __name__ == "__main__":
     main()
