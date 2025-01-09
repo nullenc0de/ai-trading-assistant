@@ -3,7 +3,7 @@ import logging
 import os
 import pandas as pd
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any, List
 from components import (
     ConfigManager, MarketMonitor, OutputFormatter, PerformanceTracker,
     RobinhoodAuthenticator, AlpacaAuthenticator, StockAnalyzer, StockScanner,
@@ -397,6 +397,31 @@ class TradingSystem:
         except Exception as e:
             logging.error(f"Regular trading handling error: {str(e)}")
 
+    async def _execute_trade(self, symbol: str, setup_details: Dict[str, Any]):
+        """Execute a trade based on the trading setup"""
+        try:
+            # Implement broker-specific trade execution logic
+            trade_params = {
+                'symbol': symbol,
+                'quantity': setup_details.get('size', 100),
+                'order_type': setup_details.get('order_type', 'market'),
+                'entry_price': setup_details.get('entry', None),
+                'stop_loss': setup_details.get('stop', None),
+                'take_profit': setup_details.get('target', None)
+            }
+            
+            # Use broker manager to execute trade
+            execution_result = await self.broker_manager.place_trade(trade_params)
+            
+            if execution_result.get('status') == 'success':
+                logging.info(f"Trade executed for {symbol}: {trade_params}")
+                self.metrics['successful_trades'] += 1
+            else:
+                logging.warning(f"Trade execution failed for {symbol}: {execution_result.get('reason', 'Unknown error')}")
+            
+        except Exception as e:
+            logging.error(f"Trade execution error for {symbol}: {str(e)}")
+
     def _parse_trading_setup(self, setup: str) -> Optional[Dict[str, Any]]:
         """Parse the trading setup string into a dictionary"""
         try:
@@ -412,7 +437,7 @@ class TradingSystem:
                     # Handle different field types
                     if 'price' in key or 'stop' in key or 'target' in key:
                         try:
-                            value = float(value.replace(', '').strip())
+                            value = float(value.replace(", ", "").strip())
                         except ValueError:
                             logging.warning(f"Invalid price format: {value}")
                             continue
