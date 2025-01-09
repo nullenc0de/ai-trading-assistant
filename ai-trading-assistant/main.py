@@ -11,8 +11,22 @@ from components import (
 
 class TradingSystem:
     def __init__(self):
+        """Initialize Trading System"""
+        # Initialize system metrics
+        self.metrics = {
+            'trades_analyzed': 0,
+            'setups_detected': 0,
+            'trades_executed': 0,
+            'successful_trades': 0,
+            'daily_watchlist': []
+        }
+        
+        # Initialize components
         self._setup_logging()
         self._init_components()
+
+        # Store active trades
+        self.active_trades = {}
 
     def _setup_logging(self):
         os.makedirs('logs', exist_ok=True)
@@ -288,21 +302,29 @@ class TradingSystem:
     async def _generate_eod_report(self):
         """Generate end-of-day analysis and performance report"""
         try:
-            # Get performance metrics
-            metrics = self.performance_tracker.get_metrics()
+            # Get performance metrics with error handling
+            try:
+                metrics = self.performance_tracker.get_metrics()
+            except Exception as e:
+                logging.error(f"Error getting performance metrics: {str(e)}")
+                metrics = {}
             
-            # Get broker metrics
-            broker_metrics = self.broker_manager.get_account_metrics()
+            # Get broker metrics with error handling
+            try:
+                broker_metrics = self.broker_manager.get_account_metrics()
+            except Exception as e:
+                logging.error(f"Error getting broker metrics: {str(e)}")
+                broker_metrics = {}
             
-            # Format the report
+            # Format the report with safe gets
             report_lines = [
                 "\n=== End of Day Report ===",
                 f"Date: {datetime.now().strftime('%Y-%m-%d')}",
                 f"Broker: {self.broker_manager.broker_type.value}",
                 "\nAccount Summary:",
-                f"Current Balance: ${broker_metrics['current_balance']:.2f}",
-                f"Day's P&L: ${broker_metrics.get('unrealized_pl', 0):.2f}",
-                f"Buying Power: ${broker_metrics['buying_power']:.2f}",
+                f"Current Balance: ${broker_metrics.get('current_balance', 0.0):.2f}",
+                f"Day's P&L: ${broker_metrics.get('unrealized_pl', 0.0):.2f}",
+                f"Buying Power: ${broker_metrics.get('buying_power', 0.0):.2f}",
                 
                 "\nToday's Trading Activity:",
                 f"Trades Analyzed: {self.metrics.get('trades_analyzed', 0)}",
@@ -311,15 +333,15 @@ class TradingSystem:
                 
                 "\nOverall Performance:",
                 f"Total Trades: {metrics.get('total_trades', 0)}",
-                f"Win Rate: {metrics.get('win_rate', 0):.1f}%",
-                f"Average P&L: ${metrics.get('avg_profit_loss', 0):.2f}",
-                f"Largest Win: ${metrics.get('largest_win', 0):.2f}",
-                f"Largest Loss: ${metrics.get('largest_loss', 0):.2f}",
+                f"Win Rate: {metrics.get('win_rate', 0.0):.1f}%",
+                f"Average P&L: ${metrics.get('avg_profit_loss', 0.0):.2f}",
+                f"Largest Win: ${metrics.get('largest_win', 0.0):.2f}",
+                f"Largest Loss: ${metrics.get('largest_loss', 0.0):.2f}",
                 
                 "\nRisk Metrics:",
                 f"Open Positions: {metrics.get('open_trades', 0)}",
-                f"Current Drawdown: {broker_metrics.get('drawdown', 0):.1f}%",
-                f"High Water Mark: ${broker_metrics.get('high_water_mark', 0):.2f}"
+                f"Current Drawdown: {broker_metrics.get('drawdown', 0.0):.1f}%",
+                f"High Water Mark: ${broker_metrics.get('high_water_mark', 0.0):.2f}"
             ]
             
             # Log the report
@@ -335,12 +357,20 @@ class TradingSystem:
                 'daily_watchlist': []
             })
             
-            # Clear caches
-            self.analyzer.clear_cache()
-            self.scanner.clear_cache()
+            # Clear caches with error handling
+            try:
+                self.analyzer.clear_cache()
+            except Exception as e:
+                logging.warning(f"Error clearing analyzer cache: {str(e)}")
+                
+            try:
+                self.scanner.clear_cache()
+            except Exception as e:
+                logging.warning(f"Error clearing scanner cache: {str(e)}")
             
         except Exception as e:
             logging.error(f"Error generating EOD report: {str(e)}")
+            return
 
     async def _handle_regular_trading(self):
         """Handle regular trading hours"""
