@@ -24,6 +24,7 @@ class PerformanceTracker:
         """Initialize log files with proper structure"""
         try:
             with self._lock:
+                self.logger.debug("Checking trades.csv")
                 # Initialize trades.csv if it doesn't exist
                 if not os.path.exists(self.trades_file):
                     columns = [
@@ -33,9 +34,10 @@ class PerformanceTracker:
                         'profit_loss', 'profit_loss_percent', 'exit_time',
                         'reason', 'notes'
                     ]
-                    self.logger.debug("trades.csv initialized")
+                    self.logger.debug("Writing trades.csv")
                     pd.DataFrame(columns=columns).to_csv(self.trades_file, index=False)
-                
+                    self.logger.debug("trades.csv initialized")
+self.logger.debug("Checking metrics.json")  
                 # Initialize metrics.json with default structure if it doesn't exist
                 # or if it's invalid
                 try:
@@ -44,6 +46,7 @@ class PerformanceTracker:
                             self.logger.debug("metrics.json loaded successfully")
                             json.load(f)  # Test if valid JSON
                     else:
+                        self.logger.debug("Saving default metrics")
                         self._save_metrics(self._create_default_metrics())
                 except json.JSONDecodeError:
                     self.logger.warning("Invalid metrics.json found. Reinitializing with defaults.")
