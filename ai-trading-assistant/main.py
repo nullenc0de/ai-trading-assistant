@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import pandas as pd
 from datetime import datetime
 from typing import Optional
 from components import (
@@ -72,8 +73,13 @@ class TradingSystem:
             if broker_type == BrokerType.ALPACA:
                 alpaca_client = self.alpaca_auth.create_trading_client()
                 if not alpaca_client:
-                    logging.warning("Failed to create Alpaca client. Falling back to paper trading.")
-                    broker_type = BrokerType.PAPER
+                    # Prompt for Alpaca credentials if not available
+                    if self._configure_alpaca():
+                        alpaca_client = self.alpaca_auth.create_trading_client()
+                    
+                    if not alpaca_client:
+                        logging.warning("Failed to create Alpaca client. Falling back to paper trading.")
+                        broker_type = BrokerType.PAPER
                     
             elif broker_type == BrokerType.ROBINHOOD:
                 robinhood_client = self.robinhood_auth.load_credentials()
@@ -106,6 +112,30 @@ class TradingSystem:
             logging.error(f"Failed to initialize components: {str(e)}")
             raise
 
+    def _configure_alpaca(self) -> bool:
+        """Interactive Alpaca configuration"""
+        try:
+            print("\n🔑 Alpaca Configuration")
+            print("Please enter your Alpaca API credentials:")
+            api_key = input("API Key ID: ").strip()
+            secret_key = input("Secret Key: ").strip()
+            
+            # Always use paper trading for safety
+            paper_trading = True
+            print("\nUsing Alpaca Paper Trading for safety.")
+            
+            if self.alpaca_auth.validate_credentials(api_key, secret_key):
+                self.alpaca_auth.save_credentials(api_key, secret_key, paper_trading)
+                print("✅ Alpaca credentials configured successfully!")
+                return True
+            else:
+                print("❌ Invalid Alpaca credentials. Please check and try again.")
+                return False
+                
+        except Exception as e:
+            logging.error(f"Error configuring Alpaca: {str(e)}")
+            return False
+
     def _select_broker(self) -> BrokerType:
         """Select broker based on configuration and available credentials"""
         try:
@@ -115,63 +145,22 @@ class TradingSystem:
             if preferred_broker == 'alpaca':
                 if self.alpaca_auth.is_authenticated():
                     return BrokerType.ALPACA
-                logging.warning("Alpaca credentials not available. Checking alternatives...")
+                logging.info("Alpaca credentials not found. Prompting for configuration...")
+                if self._configure_alpaca():
+                    return BrokerType.ALPACA
                 
-            if preferred_broker == 'robinhood':
+            elif preferred_broker == 'robinhood':
                 if self.robinhood_auth.load_credentials():
                     return BrokerType.ROBINHOOD
-                logging.warning("Robinhood credentials not available. Checking alternatives...")
-
-            # If preferred broker not available, try alternatives
-            if self.alpaca_auth.is_authenticated():
-                return BrokerType.ALPACA
-            elif self.robinhood_auth.load_credentials():
-                return BrokerType.ROBINHOOD
+                logging.warning("Robinhood credentials not available.")
             
-            # Default to paper trading if no brokers available
+            # Default to paper trading if no credentials available
             logging.info("No broker credentials available. Using paper trading mode.")
             return BrokerType.PAPER
             
         except Exception as e:
             logging.error(f"Error selecting broker: {str(e)}")
             return BrokerType.PAPER
-
-    def _configure_broker(self) -> bool:
-        """Interactive broker configuration"""
-        try:
-            print("\n🤖 Trading System Configuration")
-            print("1. Use Alpaca Trading")
-            print("2. Use Robinhood")
-            print("3. Paper Trading Only")
-            
-            choice = input("Select option (1-3): ").strip()
-            
-            if choice == "1":
-                print("\nAlpaca Configuration")
-                api_key = input("Enter Alpaca API Key: ").strip()
-                secret_key = input("Enter Alpaca Secret Key: ").strip()
-                paper = input("Use paper trading? (Y/N): ").strip().lower() == 'y'
-                
-                if self.alpaca_auth.validate_credentials(api_key, secret_key):
-                    self.alpaca_auth.save_credentials(api_key, secret_key, paper)
-                    return True
-                    
-            elif choice == "2":
-                print("\nRobinhood Configuration")
-                if not self.robinhood_auth.save_credentials():
-                    print("Failed to configure Robinhood")
-                    return False
-                return True
-                
-            elif choice == "3":
-                print("\nUsing paper trading mode")
-                return True
-                
-            return False
-            
-        except Exception as e:
-            logging.error(f"Error configuring broker: {str(e)}")
-            return False
 
     async def analyze_symbol(self, symbol: str):
         """Analyze a single symbol for trading opportunities"""
@@ -243,61 +232,47 @@ class TradingSystem:
         except Exception as e:
             logging.error(f"Symbol analysis error: {str(e)}")
 
-    async def run(self):
-        """Main trading system loop"""
-        while True:
-            try:
-                # Check market status
-                market_phase = self.market_monitor.get_market_phase()
-                market_status = self.market_monitor.get_market_status()
-                
-                if market_phase == 'closed':
-                    current_time = datetime.now(self.market_monitor.timezone).strftime('%H:%M:%S %Z')
-                    time_until_open = self.market_monitor.time_until_market_open()
-                    
-                    if market_status['is_weekend']:
-                        logging.info(f"Market closed for weekend. Current time: {current_time}")
-                    elif market_status['today_is_holiday']:
-                        logging.info(f"Market closed for holiday. Current time: {current_time}")
-                    else:
-                        hours_until = time_until_open.total_seconds() / 3600
-                        logging.info(f"Market closed. Current time: {current_time}. Next session begins in {hours_until:.1f} hours")
-                    await asyncio.sleep(300)  # Check every 5 minutes
+    async def _analyze_premarket_movers(self, symbols: List[str]):
+        """Analyze pre-market movers and prepare watchlist"""
+        try:
+            premarket_movers = []
+            for symbol in symbols:
+                stock_data = self.analyzer.analyze_stock(symbol)
+                if not stock_data:
                     continue
-                    
-                elif market_phase == 'pre-market':
-                    await self._handle_premarket()
-                    
-                elif market_phase == 'post-market':
-                    await self._handle_postmarket()
-                    
-                else:  # Regular trading hours
-                    await self._handle_regular_trading()
                 
-            except Exception as e:
-                logging.error(f"Main loop error: {str(e)}")
-                await asyncio.sleep(60)
-
-    async def _handle_premarket(self):
-        """Handle pre-market analysis"""
-        try:
-            logging.info("Pre-market session. Running pre-market scan...")
-            symbols = await self.scanner.get_symbols(max_symbols=50)
-            await self._analyze_premarket_movers(symbols)
-            await asyncio.sleep(300)  # 5-minute delay between pre-market scans
+                # Calculate pre-market change
+                current_price = stock_data['current_price']
+                prev_close = stock_data.get('previous_close', current_price)
+                change_pct = ((current_price - prev_close) / prev_close) * 100
+                volume = stock_data.get('volume_analysis', {}).get('current_volume', 0)
+                avg_volume = stock_data.get('volume_analysis', {}).get('avg_volume', 1)
+                rel_volume = volume / avg_volume if avg_volume > 0 else 0
+                
+                # Track significant pre-market activity
+                if abs(change_pct) >= 3.0 or rel_volume >= 2.0:
+                    premarket_movers.append({
+                        'symbol': symbol,
+                        'price': current_price,
+                        'change_pct': change_pct,
+                        'volume': volume,
+                        'rel_volume': rel_volume,
+                        'technical_indicators': stock_data.get('technical_indicators', {})
+                    })
             
+            if premarket_movers:
+                logging.info("\nPre-market Movers:")
+                for mover in sorted(premarket_movers, key=lambda x: abs(x['change_pct']), reverse=True):
+                    logging.info(
+                        f"{mover['symbol']}: {mover['change_pct']:+.1f}% | "
+                        f"${mover['price']:.2f} | {mover['rel_volume']:.1f}x Volume"
+                    )
+                
+                # Update watchlist for regular session
+                self.metrics['daily_watchlist'] = [m['symbol'] for m in premarket_movers]
+                
         except Exception as e:
-            logging.error(f"Pre-market handling error: {str(e)}")
-
-    async def _handle_postmarket(self):
-        """Handle post-market wrap-up"""
-        try:
-            logging.info("Post-market session. Generating end-of-day report...")
-            await self._generate_eod_report()
-            await asyncio.sleep(300)
-            
-        except Exception as e:
-            logging.error(f"Post-market handling error: {str(e)}")
+            logging.error(f"Pre-market analysis error: {str(e)}")
 
     async def _generate_eod_report(self):
         """Generate end-of-day analysis and performance report"""
@@ -372,6 +347,27 @@ class TradingSystem:
             logging.error(f"Error generating EOD report: {str(e)}")
             return
 
+    async def _handle_premarket(self):
+        """Handle pre-market analysis"""
+        try:
+            logging.info("Pre-market session. Running pre-market scan...")
+            symbols = await self.scanner.get_symbols(max_symbols=50)
+            await self._analyze_premarket_movers(symbols)
+            await asyncio.sleep(300)  # 5-minute delay between pre-market scans
+            
+        except Exception as e:
+            logging.error(f"Pre-market handling error: {str(e)}")
+
+    async def _handle_postmarket(self):
+        """Handle post-market wrap-up"""
+        try:
+            logging.info("Post-market session. Generating end-of-day report...")
+            await self._generate_eod_report()
+            await asyncio.sleep(300)
+            
+        except Exception as e:
+            logging.error(f"Post-market handling error: {str(e)}")
+
     async def _handle_regular_trading(self):
         """Handle regular trading hours"""
         try:
@@ -401,6 +397,77 @@ class TradingSystem:
         except Exception as e:
             logging.error(f"Regular trading handling error: {str(e)}")
 
+    def _parse_trading_setup(self, setup: str) -> Optional[Dict[str, Any]]:
+        """Parse the trading setup string into a dictionary"""
+        try:
+            setup_dict = {}
+            lines = setup.strip().split("\n")
+            
+            for line in lines:
+                if ':' in line:
+                    key, value = line.split(':', 1)
+                    key = key.strip().lower()
+                    value = value.strip()
+                    
+                    # Handle different field types
+                    if 'price' in key or 'stop' in key or 'target' in key:
+                        try:
+                            value = float(value.replace(', '').strip())
+                        except ValueError:
+                            logging.warning(f"Invalid price format: {value}")
+                            continue
+                            
+                    elif 'confidence' in key:
+                        try:
+                            value = float(value.rstrip('%'))
+                        except ValueError:
+                            logging.warning(f"Invalid confidence format: {value}")
+                            continue
+                    
+                    setup_dict[key] = value
+            
+            return setup_dict if setup_dict else None
+            
+        except Exception as e:
+            logging.error(f"Error parsing trading setup: {str(e)}")
+            return None
+
+    async def run(self):
+        """Main trading system loop"""
+        while True:
+            try:
+                # Check market status
+                market_phase = self.market_monitor.get_market_phase()
+                market_status = self.market_monitor.get_market_status()
+                
+                if market_phase == 'closed':
+                    current_time = datetime.now(self.market_monitor.timezone).strftime('%H:%M:%S %Z')
+                    time_until_open = self.market_monitor.time_until_market_open()
+                    
+                    if market_status['is_weekend']:
+                        logging.info(f"Market closed for weekend. Current time: {current_time}")
+                    elif market_status['today_is_holiday']:
+                        logging.info(f"Market closed for holiday. Current time: {current_time}")
+                    else:
+                        hours_until = time_until_open.total_seconds() / 3600
+                        logging.info(f"Market closed. Current time: {current_time}. Next session begins in {hours_until:.1f} hours")
+                    await asyncio.sleep(300)  # Check every 5 minutes
+                    continue
+                    
+                elif market_phase == 'pre-market':
+                    await self._handle_premarket()
+                    
+                elif market_phase == 'post-market':
+                    await self._handle_postmarket()
+                    
+                else:  # Regular trading hours
+                    await self._handle_regular_trading()
+                
+            except Exception as e:
+                logging.error(f"Main loop error: {str(e)}")
+                await asyncio.sleep(60)
+
+
 def main():
     try:
         logging.info("Starting trading system...")
@@ -422,6 +489,7 @@ def main():
         raise
     finally:
         logging.info("Trading system shutdown complete")
+
 
 if __name__ == "__main__":
     main()
