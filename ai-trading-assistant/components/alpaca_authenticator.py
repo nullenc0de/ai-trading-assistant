@@ -4,40 +4,16 @@ import logging
 from typing import Dict, Any, Optional
 from alpaca.trading.client import TradingClient
 from alpaca.data.historical.stock import StockHistoricalDataClient
-from alpaca.trading.requests import GetAssetsRequest
-from alpaca.trading.enums import AssetClass
 
 class AlpacaAuthenticator:
     def __init__(self, config_path='alpaca_config.json'):
         """Initialize Alpaca Authentication Manager"""
         self.config_path = config_path
         self.logger = logging.getLogger(__name__)
-        
-        # Initialize logging
         self.logger.setLevel(logging.INFO)
         
         # Ensure config directory exists
         os.makedirs(os.path.dirname(os.path.abspath(config_path)), exist_ok=True)
-        
-        # Environment variables take precedence
-        self.api_key = os.getenv("ALPACA_API_KEY_ID")
-        self.secret_key = os.getenv("ALPACA_API_SECRET_KEY")
-        
-        if self.api_key and self.secret_key:
-            self.save_credentials(self.api_key, self.secret_key)
-
-    def _create_default_config(self) -> Dict[str, Any]:
-        """Create default configuration"""
-        return {
-            "api_key": "",
-            "secret_key": "",
-            "paper_trading": True,  # Default to paper trading for safety
-            "settings": {
-                "max_retries": 3,
-                "timeout": 30,
-                "debug_mode": False
-            }
-        }
 
     def save_credentials(self, api_key: str, secret_key: str, paper_trading: bool = True) -> bool:
         """Save Alpaca credentials securely"""
@@ -48,8 +24,7 @@ class AlpacaAuthenticator:
                 "paper_trading": paper_trading,
                 "settings": {
                     "max_retries": 3,
-                    "timeout": 30,
-                    "debug_mode": False
+                    "timeout": 30
                 }
             }
             
@@ -69,19 +44,16 @@ class AlpacaAuthenticator:
     def load_credentials(self) -> Optional[Dict[str, Any]]:
         """Load Alpaca credentials"""
         try:
-            if self.api_key and self.secret_key:
-                return {
-                    "api_key": self.api_key,
-                    "secret_key": self.secret_key,
-                    "paper_trading": True
-                }
-                
             if not os.path.exists(self.config_path):
                 return None
             
             with open(self.config_path, 'r') as f:
                 config = json.load(f)
             
+            # Validate required fields
+            if not config.get('api_key') or not config.get('secret_key'):
+                return None
+                
             return config
             
         except Exception as e:
@@ -98,12 +70,11 @@ class AlpacaAuthenticator:
             client = TradingClient(
                 api_key=creds['api_key'],
                 secret_key=creds['secret_key'],
-                paper=creds.get('paper_trading', True)
+                paper=creds.get('paper_trading', True)  # Default to paper trading
             )
             
             # Test connection
             client.get_account()
-            
             return client
             
         except Exception as e:
@@ -126,23 +97,13 @@ class AlpacaAuthenticator:
             self.logger.error(f"Error creating Alpaca data client: {str(e)}")
             return None
 
-    def remove_credentials(self) -> bool:
-        """Remove saved credentials"""
-        try:
-            if os.path.exists(self.config_path):
-                os.remove(self.config_path)
-            return True
-        except Exception as e:
-            self.logger.error(f"Error removing credentials: {str(e)}")
-            return False
-
     def validate_credentials(self, api_key: str, secret_key: str) -> bool:
         """Validate Alpaca credentials by attempting to create a client"""
         try:
             client = TradingClient(api_key=api_key, secret_key=secret_key, paper=True)
-            # Test API connection by getting account info
-            client.get_account()
+            client.get_account()  # Test API connection
             return True
+            
         except Exception as e:
             self.logger.error(f"Invalid Alpaca credentials: {str(e)}")
             return False
@@ -153,28 +114,20 @@ class AlpacaAuthenticator:
             client = self.create_trading_client()
             if not client:
                 return False
-            # Test connection
+                
             client.get_account()
             return True
+            
         except Exception:
             return False
 
-    def get_account_info(self) -> Optional[Dict[str, Any]]:
-        """Get account information"""
+    def remove_credentials(self) -> bool:
+        """Remove saved credentials"""
         try:
-            client = self.create_trading_client()
-            if not client:
-                return None
-                
-            account = client.get_account()
-            return {
-                'account_number': account.account_number,
-                'buying_power': float(account.buying_power),
-                'cash': float(account.cash),
-                'equity': float(account.equity),
-                'status': account.status
-            }
+            if os.path.exists(self.config_path):
+                os.remove(self.config_path)
+            return True
             
         except Exception as e:
-            self.logger.error(f"Error getting account info: {str(e)}")
-            return None
+            self.logger.error(f"Error removing credentials: {str(e)}")
+            return False
