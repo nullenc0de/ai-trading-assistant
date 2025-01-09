@@ -1,7 +1,7 @@
 """
-Alpaca Connection Test Script
---------------------------
-Tests Alpaca credentials and connection.
+Alpaca Connection Test Utility
+---------------------------
+Tests Alpaca credentials and displays account information.
 
 Author: AI Trading Assistant
 Version: 1.1
@@ -29,12 +29,12 @@ def configure_alpaca():
     
     print("\nValidating credentials...")
     if auth.validate_credentials(api_key, secret_key):
-        auth.save_credentials(api_key, secret_key, paper_trading=True)
-        print("✅ Credentials saved successfully!")
-        return True
-    else:
-        print("❌ Invalid credentials")
-        return False
+        if auth.save_credentials(api_key, secret_key, paper_trading=True):
+            print("✅ Credentials saved successfully!")
+            return True
+    
+    print("❌ Invalid credentials")
+    return False
 
 def test_connection():
     """Test Alpaca connection and display account information"""
@@ -64,7 +64,7 @@ def test_connection():
                     print("\nCurrent Positions:")
                     for pos in positions:
                         print(f"- {pos.symbol}: {float(pos.qty)} shares @ ${float(pos.avg_entry_price):.2f}")
-            except Exception as e:
+            except Exception:
                 print(f"Note: No positions found")
             
             # Account restrictions
